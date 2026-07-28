@@ -1,0 +1,228 @@
+# dstest Documentation
+
+## Lua API
+
+### Core Functions
+
+#### `dstest.config(options)`
+Configures the experiment. Must be called before `dstest.setup()` and `dstest.step()`. The `substrate` and `seed` fields are required.
+
+```lua
+dstest.config({
+    substrate = "docker",
+    seed = 42,
+    weights = { pause = 0.5, kill = 0.3, ["deprive:disk"] = 0.2 },
+    accumulation = "single",
+    http_timeout = 10,
+})
+```
+
+**Configuration options:**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `substrate` | string | Yes | - | Substrate type (currently only `"docker"`) |
+| `seed` | number | Yes | - | Random seed for deterministic fault selection |
+| `weights` | table | No | See below | Fault type weights for weighted random selection |
+| `accumulation` | string | No | `"single"` | Fault accumulation mode (`"single"` or `"accumulate"`) |
+| `http_timeout` | number | No | `5` | HTTP request timeout in seconds |
+| `http_retries` | number | No | `30` | HTTP retry attempts |
+| `http_retry_delay` | number | No | `500` | Delay between HTTP retries (ms) |
+| `step_delay` | number | No | `1000` | Delay before applying fault in single mode (ms) |
+| `require_seed` | boolean | No | `true` | Require seed in config |
+
+#### `dstest.setup(config)`
+Creates a test subject. Returns a subject ID string in the format `docker/<container-id>`. Uses the substrate type configured in `dstest.config()`.
+
+```lua
+local subject = dstest.setup({
+    image = "kennethreitz/httpbin",
+    ports = { 80 },
+    volumes = { "/host/path:/container/path:ro" },
+    env = { DEBUG = "true", LOG_LEVEL = "info" },
+    cmd = { "python", "-m", "httpbin" },
+})
+```
+
+**Configuration options:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `image` | string | Yes | Docker image to pull and run |
+| `ports` | table | No | Array of port numbers to expose |
+| `volumes` | table | No | Array of bind mount specifications (`host:container[:options]`) |
+| `env` | table | No | Key-value table of environment variables |
+| `cmd` | table | No | Array of command arguments to override container entrypoint |
+
+#### `dstest.http(subject, method, path)`
+
+### Fault Injection
+
+#### `dstest.step()`
+Applies the next fault in the sequence. Returns a table describing what happened, or `{more = false}` when complete.
+
+```lua
+while true do
+    local result = dstest.step()
+    if not result.more then
+        break
+    end
+    -- Verify service still works
+    local resp = dstest.http(subject, "GET", "/get")
+    dstest.info("status=" .. resp.status .. " after fault=" .. result.fault)
+end
+```
+
+Return table fields:
+- `fault` (string): The fault type applied
+- `subject` (string): The subject ID (format: `docker/<container-id>`)
+- `round` (number): Current round number (1-indexed)
+- `total_rounds` (number): Total rounds in this experiment
+- `remaining` (number): Steps remaining
+- `more` (boolean): Whether more steps are available
+
+#### `dstest.run_steps(n)`
+Runs multiple steps and returns an array of results.
+
+```lua
+local results = dstest.run_steps(5)
+for i, result in ipairs(results) do
+    dstest.info("round " .. result.round .. ": " .. result.fault)
+end
+```
+
+#### `dstest.clear(subject)`
+Clears all active faults on a subject.
+
+```lua
+dstest.clear(subject)
+```
+
+### Logging
+
+- `dstest.debug(msg)` - Debug-level message
+- `dstest.info(msg)` - Info-level message
+- `dstest.warn(msg)` - Warning-level message
+- `dstest.error(msg)` - Error-level message
+
+### Oracle
+
+The oracle mechanism provides automated verification of system properties during fault injection experiments.
+
+#### `dstest.oracle.predicate(name, fn)`
+Registers a health predicate that is checked after each fault. The function receives `(subject, fault, round)` and returns `true` or `{passed, message?}`.
+
+```lua
+dstest.oracle.predicate("http_health", function(subject, fault, round)
+    local resp = dstest.http(subject, "GET", "/health")
+    if resp.status ~= 200 then
+        return {false, "health check failed: " .. resp.status}
+    end
+    return true
+end)
+```
+
+#### `dstest.oracle.invariant(name, fn)`
+Registers an invariant that is checked continuously throughout the experiment. Returns `true` or `{passed, message?}`.
+
+```lua
+dstest.oracle.invariant("response_time", function()
+    local start = os.clock()
+    dstest.http(s, "GET", "/get")
+    local elapsed = os.clock() - start
+    if elapsed > 1.0 then
+        return {false, "response time exceeded 1s: " .. elapsed}
+    end
+    return true
+end)
+```
+
+#### `dstest.oracle.run(fn)`
+Runs a function with the oracle enabled, returning a report. This automatically enables oracle checking during `step()` and `run_steps()`.
+
+```lua
+local report = dstest.oracle.run(function()
+    dstest.run_steps(10)
+end)
+
+if not report.passed then
+    for _, failure in ipairs(report.failures) do
+        dstest.warn(failure.type .. " '" .. failure.name .. "' failed: " .. failure.error)
+    end
+    error("oracle verification failed")
+end
+```
+
+Report fields:
+- `passed` (boolean): Overall pass/fail status
+- `total_checks` (number): Total number of checks performed
+- `passed_checks` (number): Number of passed checks
+- `failed_checks` (number): Number of failed checks
+- `failures` (array): List of failure records
+
+Failure record fields:
+- `type` (string): Either `"predicate"` or `"invariant"`
+- `name` (string): The name of the check that failed
+- `round` (number, optional): The round number (predicates only)
+- `fault` (string, optional): The fault type applied (predicates only)
+- `subject` (string, optional): The subject ID (predicates only)
+- `error` (string): The error message
+
+#### `dstest.oracle.enable()`
+Enables oracle checking and resets the report. Oracle predicates and invariants will run automatically after each `step()` call.
+
+#### `dstest.oracle.disable()`
+Disables oracle checking.
+
+#### `dstest.oracle.report()`
+Returns the current oracle report without modifying state.
+
+#### `dstest.oracle.reset()`
+Resets the oracle report, clearing all recorded results.
+
+## Default Weights
+
+| Fault | Weight |
+|-------|--------|
+| `pause` | 0.40 |
+| `kill` | 0.25 |
+| `deprive:disk` | 0.15 |
+| `deprive:network` | 0.15 |
+| `deprive:memory` | 0.05 |
+
+### Accumulation Modes
+
+- `single`: Each subject can have only one active fault. Previous faults are cleared before applying new ones.
+- `accumulate`: Multiple faults can stack on the same subject.
+
+## Fault Types
+
+| Fault | Effect |
+|-------|--------|
+| `pause` | Pauses the container (SIGSTOP) |
+| `kill` | Kills the container (SIGKILL) |
+| `deprive:disk` | Throttles disk I/O to 1KB/s |
+| `deprive:network` | Disconnects from bridge network (no internet) |
+| `deprive:memory` | Limits container memory to 4MB |
+
+## Determinism
+
+Same seed produces identical fault sequences:
+
+```lua
+dstest.config({ substrate = "docker", seed = 42 })
+local s = dstest.setup({ image = "kennethreitz/httpbin", ports = { 80 } })
+local results1 = dstest.run_steps(10)
+
+dstest.config({ substrate = "docker", seed = 42 })
+local s = dstest.setup({ image = "kennethreitz/httpbin", ports = { 80 } })
+local results2 = dstest.run_steps(10)
+
+-- results1 and results2 have identical fault sequences
+```
+
+## Examples
+
+- `basic.lua` - Minimal setup with HTTP checks
+- `coroutine.lua` - User-controlled fault injection with coroutines
+- `response-time.lua` - Response time validation with oracle predicates
