@@ -50,7 +50,7 @@ local subject = dstest.setup({
 |-------|------|----------|-------------|
 | `image` | string | Yes | Docker image to pull and run |
 | `ports` | table | No | Array of port numbers to expose |
-| `volumes` | table | No | Array of bind mount specifications (`host:container[:options]`) |
+| `volumes` | table | No | Array of bind mount specifications (`host:container[:options]`). Host path must be absolute. |
 | `env` | table | No | Key-value table of environment variables |
 | `cmd` | table | No | Array of command arguments to override container entrypoint |
 

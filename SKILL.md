@@ -45,6 +45,8 @@ cargo install --path .
 
 ## Configuration
 
+Call `dstest.config()` first to set substrate and seed. Then `dstest.setup()` uses those settings.
+
 ```lua
 dstest.config({
     substrate = "docker",      -- Required: only "docker" supported
@@ -69,10 +71,11 @@ dstest.config({
 
 ```lua
 -- Create a subject (container)
+-- Substrate type comes from dstest.config({ substrate = "docker" })
 local s = dstest.setup({
     image = "kennethreitz/httpbin",
     ports = { 80 },
-    volumes = { "/host:/container:ro" },
+    volumes = { "/absolute/host/path:/container:ro" },  -- must be absolute
     env = { DEBUG = "true" },
     cmd = { "python", "-m", "httpbin" },
 })
