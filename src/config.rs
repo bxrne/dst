@@ -46,11 +46,12 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let mut fault_weights = HashMap::new();
-        fault_weights.insert(String::from("pause"), 0.40);
+        fault_weights.insert(String::from("pause"), 0.35);
         fault_weights.insert(String::from("kill"), 0.25);
-        fault_weights.insert(String::from("deprive:disk"), 0.15);
-        fault_weights.insert(String::from("deprive:network"), 0.15);
-        fault_weights.insert(String::from("deprive:memory"), 0.05);
+        fault_weights.insert(String::from("deprive:disk"), 0.10);
+        fault_weights.insert(String::from("deprive:network"), 0.10);
+        fault_weights.insert(String::from("deprive:memory"), 0.10);
+        fault_weights.insert(String::from("deprive:cpu"), 0.10);
 
         Self {
             substrate: None,

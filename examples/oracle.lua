@@ -13,6 +13,9 @@ local s = dstest.setup({
 })
 
 dstest.oracle.predicate("get_endpoint", function(subject, fault, round)
+    if fault == "pause" or fault == "kill" then
+        return true
+    end
     local ok, resp = pcall(dstest.http, subject, "GET", "/get")
     if not ok then
         return { false, "request failed: " .. tostring(resp) }
@@ -24,6 +27,9 @@ dstest.oracle.predicate("get_endpoint", function(subject, fault, round)
 end)
 
 dstest.oracle.predicate("status_404", function(subject, fault, round)
+    if fault == "pause" or fault == "kill" then
+        return true
+    end
     local ok, resp = pcall(dstest.http, subject, "GET", "/status/404")
     if not ok then
         return { false, "request failed: " .. tostring(resp) }

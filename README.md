@@ -10,6 +10,7 @@ From crates.io:
 
 ```bash
 cargo install dstest
+dstest < examples/basic.lua
 ```
 
 Or build from source:
@@ -33,12 +34,33 @@ dstest lets you write Lua scripts that define test subjects (Docker containers),
 ## Examples
 
 - `basic.lua` - Minimal setup with HTTP checks
-- `coroutine.lua` - User-controlled fault injection with coroutines
-- `response-time.lua` - Response time validation with oracle predicates
+- `oracle.lua` - Oracle predicates for automated verification
+- `response-time.lua` - Response time validation
+- `multi-service.lua` - Fault injection across multiple containers
+- `fault-accumulation.lua` - Stacking faults without clearing
+- `http-assertions.lua` - Custom HTTP status/body assertions
+- `parameter-sweep.lua` - Running experiments with different seeds
 
 ## Documentation
 
 See [DOCS.md](DOCS.md) for the full Lua API reference.
+
+## AI Assistant Support
+
+This repo includes an AI skill (`SKILL.md`) that teaches assistants how to work with dstest.
+
+**To use with your agent:**
+
+```bash
+# Claude Code / Opencode
+cp SKILL.md ~/.config/opencode/skills/dstest/SKILL.md
+
+# Other agents (e.g., ~/.agents/skills/)
+mkdir -p ~/.agents/skills/dstest
+cp SKILL.md ~/.agents/skills/dstest/SKILL.md
+```
+
+Then instruct your assistant to "use the dstest skill" when writing or debugging chaos experiments.
 
 ## Requirements
 

@@ -47,6 +47,7 @@ pub enum Tier {
     Disk,
     Network,
     Memory,
+    Cpu,
 }
 
 impl fmt::Display for Tier {
@@ -55,6 +56,7 @@ impl fmt::Display for Tier {
             Tier::Disk => write!(f, "disk"),
             Tier::Network => write!(f, "network"),
             Tier::Memory => write!(f, "memory"),
+            Tier::Cpu => write!(f, "cpu"),
         }
     }
 }
@@ -63,14 +65,12 @@ impl FromStr for Tier {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("disk") {
-            Ok(Tier::Disk)
-        } else if s.eq_ignore_ascii_case("network") {
-            Ok(Tier::Network)
-        } else if s.eq_ignore_ascii_case("memory") {
-            Ok(Tier::Memory)
-        } else {
-            Err(format!("unknown tier: {}", s))
+        match s.to_lowercase().as_str() {
+            "disk" => Ok(Tier::Disk),
+            "network" => Ok(Tier::Network),
+            "memory" => Ok(Tier::Memory),
+            "cpu" => Ok(Tier::Cpu),
+            _ => Err(format!("unknown tier: {}", s)),
         }
     }
 }

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::sync::OnceLock;
 
 use bollard::Docker as BollardDocker;
@@ -110,16 +111,24 @@ impl Substrate for Docker {
         let id = Self::container_id(subject);
 
         match fault {
-            Fault::Pause => {
-                info!("Pausing container id={}", id);
-                rt.block_on(self.connection.pause_container(id))
-                    .map_err(|e| format!("Failed to pause container {}: {}", id, e))?;
-            }
-            Fault::Kill => {
-                info!("Killing container id={}", id);
-                rt.block_on(self.connection.kill_container(id, None))
-                    .map_err(|e| format!("Failed to kill container {}: {}", id, e))?;
-            }
+            Fault::Pause => match rt.block_on(self.connection.pause_container(id)) {
+                Ok(_) => info!("Paused container id={}", id),
+                Err(BollardError::DockerResponseServerError {
+                    status_code: 409, ..
+                }) => {
+                    debug!("Container id={} already paused", id);
+                }
+                Err(e) => return Err(format!("Failed to pause container {}: {}", id, e)),
+            },
+            Fault::Kill => match rt.block_on(self.connection.kill_container(id, None)) {
+                Ok(_) => info!("Killed container id={}", id),
+                Err(BollardError::DockerResponseServerError {
+                    status_code: 409, ..
+                }) => {
+                    debug!("Container id={} not running", id);
+                }
+                Err(e) => return Err(format!("Failed to kill container {}: {}", id, e)),
+            },
             Fault::Deprive(tier) => {
                 info!("Depriving container id={} tier={}", id, tier);
                 self.deprive_resource(subject, tier)?;
@@ -176,22 +185,63 @@ impl Docker {
         subject.id.strip_prefix("docker/").unwrap_or(&subject.id)
     }
 
+    fn root_block_device() -> Option<String> {
+        let mountinfo = fs::read_to_string("/proc/self/mountinfo").ok()?;
+        for line in mountinfo.lines() {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() > 4 && fields[4] == "/" {
+                let dev = fields.get(2)?;
+                let (major, _minor) = dev.split_once(':')?;
+                let major: i32 = major.parse().ok()?;
+                let partitions = fs::read_to_string("/proc/partitions").ok()?;
+                for pline in partitions.lines().skip(2) {
+                    let pfields: Vec<&str> = pline.split_whitespace().collect();
+                    if pfields.len() >= 4 {
+                        let pmajor: i32 = pfields[0].parse().ok()?;
+                        if pmajor == major {
+                            let name = pfields[3];
+                            return Some(format!("/dev/{}", name));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn deprive_resource(&self, subject: &Subject, tier: &crate::fault::Tier) -> Result<(), String> {
         let rt = runtime();
         let id = Self::container_id(subject);
 
         match tier {
             crate::fault::Tier::Disk => {
-                info!("Throttling disk I/O for container id={}", id);
+                let device = Self::root_block_device()
+                    .or_else(|| {
+                        fs::read_dir("/dev").ok().and_then(|entries| {
+                            for entry in entries.flatten() {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                if name.starts_with("nvme")
+                                    || name.starts_with("sd")
+                                    || name.starts_with("vd")
+                                {
+                                    return Some(format!("/dev/{}", name));
+                                }
+                            }
+                            None
+                        })
+                    })
+                    .unwrap_or_else(|| "/dev/sda".to_string());
+
+                info!("Throttling disk I/O for container id={} on {}", id, device);
                 let update_config = ContainerUpdateBody {
-                    blkio_weight: Some(10),
+                    blkio_weight: Some(50),
                     blkio_device_read_bps: Some(vec![ThrottleDevice {
-                        path: Some("/dev/sda".to_string()),
-                        rate: Some(1024),
+                        path: Some(device.clone()),
+                        rate: Some(1024 * 1024),
                     }]),
                     blkio_device_write_bps: Some(vec![ThrottleDevice {
-                        path: Some("/dev/sda".to_string()),
-                        rate: Some(1024),
+                        path: Some(device),
+                        rate: Some(1024 * 1024),
                     }]),
                     ..Default::default()
                 };
@@ -215,14 +265,48 @@ impl Docker {
                 }
             }
             crate::fault::Tier::Memory => {
-                info!("Limiting memory for container id={} to 4MB", id);
+                let container_info = rt
+                    .block_on(self.connection.inspect_container(
+                        id,
+                        None::<bollard::query_parameters::InspectContainerOptions>,
+                    ))
+                    .map_err(|e| format!("Failed to inspect container: {}", e))?;
+
+                let current_limit = container_info
+                    .host_config
+                    .and_then(|hc| hc.memory)
+                    .unwrap_or(0);
+
+                let new_limit = if current_limit > 0 {
+                    (current_limit / 2).max(64 * 1024 * 1024)
+                } else {
+                    64 * 1024 * 1024
+                };
+
+                info!(
+                    "Limiting memory for container id={} to {}MB (was {}MB)",
+                    id,
+                    new_limit / (1024 * 1024),
+                    current_limit / (1024 * 1024)
+                );
+
                 let update_config = ContainerUpdateBody {
-                    memory: Some(4 * 1024 * 1024),
-                    memory_swap: Some(4 * 1024 * 1024),
+                    memory: Some(new_limit),
+                    memory_swap: Some(new_limit),
                     ..Default::default()
                 };
                 rt.block_on(self.connection.update_container(id, update_config))
                     .map_err(|e| format!("Failed to limit memory: {}", e))?;
+            }
+            crate::fault::Tier::Cpu => {
+                info!("Throttling CPU for container id={}", id);
+                let update_config = ContainerUpdateBody {
+                    cpu_period: Some(100000),
+                    cpu_quota: Some(20000),
+                    ..Default::default()
+                };
+                rt.block_on(self.connection.update_container(id, update_config))
+                    .map_err(|e| format!("Failed to throttle CPU: {}", e))?;
             }
         }
 
@@ -289,6 +373,8 @@ impl Docker {
             memory_swap: None,
             blkio_device_read_bps: None,
             blkio_device_write_bps: None,
+            cpu_period: None,
+            cpu_quota: None,
             ..Default::default()
         };
 
