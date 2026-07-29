@@ -184,11 +184,12 @@ Resets the oracle report, clearing all recorded results.
 
 | Fault | Weight |
 |-------|--------|
-| `pause` | 0.40 |
+| `pause` | 0.35 |
 | `kill` | 0.25 |
-| `deprive:disk` | 0.15 |
-| `deprive:network` | 0.15 |
-| `deprive:memory` | 0.05 |
+| `deprive:disk` | 0.10 |
+| `deprive:network` | 0.10 |
+| `deprive:memory` | 0.10 |
+| `deprive:cpu` | 0.10 |
 
 ### Accumulation Modes
 
@@ -199,11 +200,12 @@ Resets the oracle report, clearing all recorded results.
 
 | Fault | Effect |
 |-------|--------|
-| `pause` | Pauses the container (SIGSTOP) |
+| `pause` | Freezes the container (cgroups freeze) |
 | `kill` | Kills the container (SIGKILL) |
-| `deprive:disk` | Throttles disk I/O to 1KB/s |
+| `deprive:disk` | Throttles disk I/O to 1MB/s, 50% blkio weight |
 | `deprive:network` | Disconnects from bridge network (no internet) |
-| `deprive:memory` | Limits container memory to 4MB |
+| `deprive:memory` | Reduces memory limit to 50% of current (min 64MB) |
+| `deprive:cpu` | Limits CPU to 20% quota |
 
 ## Determinism
 
@@ -224,5 +226,9 @@ local results2 = dstest.run_steps(10)
 ## Examples
 
 - `basic.lua` - Minimal setup with HTTP checks
-- `coroutine.lua` - User-controlled fault injection with coroutines
-- `response-time.lua` - Response time validation with oracle predicates
+- `oracle.lua` - Oracle predicates for automated verification
+- `response-time.lua` - Response time validation
+- `multi-service.lua` - Fault injection across multiple containers
+- `fault-accumulation.lua` - Stacking faults without clearing
+- `http-assertions.lua` - Custom HTTP status/body assertions
+- `parameter-sweep.lua` - Running experiments with different seeds
