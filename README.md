@@ -1,5 +1,8 @@
 # dstest
 
+[![CI](https://github.com/bxrne/dstest/actions/workflows/ci.yml/badge.svg)](https://github.com/bxrne/dstest/actions/workflows/ci.yml)
+[![Release](https://github.com/bxrne/dstest/actions/workflows/release.yml/badge.svg)](https://github.com/bxrne/dstest/actions/workflows/release.yml)
+
 Deterministic Simulation Testing for containerised services.
 
 Write Lua scripts to define, control, and verify chaos experiments on Docker containers with reproducible fault injection.
@@ -10,7 +13,12 @@ From crates.io:
 
 ```bash
 cargo install dstest
+
+# Run a script file
 dstest < examples/basic.lua
+
+# Or use REPL mode: type your script interactively, press Ctrl+D to execute
+dstest
 ```
 
 Or build from source:
@@ -24,7 +32,11 @@ cargo build --release
 ## Quick Start
 
 ```bash
+# Run a script file
 cat examples/basic.lua | cargo run
+
+# Or use REPL mode: type your script and press Ctrl+D to run it
+cargo run
 ```
 
 ## Overview

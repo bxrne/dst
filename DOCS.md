@@ -1,5 +1,20 @@
 # dstest Documentation
 
+## Usage
+
+dstest reads a Lua script from stdin. You can either pipe in a script file or type interactively.
+
+```bash
+# Run a script file
+dstest < examples/basic.lua
+cat examples/basic.lua | dstest
+
+# REPL mode: run dstest with no redirect, type your script, press Ctrl+D to execute
+dstest
+```
+
+In REPL mode, dstest reads until EOF (Ctrl+D), then executes the entire script. Logging output is printed to stderr as the script runs.
+
 ## Lua API
 
 ### Core Functions
