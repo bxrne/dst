@@ -1,15 +1,13 @@
 use mlua::{Lua, Result, Table};
 
-use crate::bindings::{LuaModule, context::BindingContext};
+use crate::bindings::LuaModule;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 
 pub struct Log;
 
-impl LuaModule for Log {
-    fn namespace() -> &'static str {
-        "log"
-    }
-
-    fn register(lua: &Lua, dstest: &Table, _: &BindingContext) -> Result<()> {
+impl<S: Substrate> LuaModule<S> for Log {
+    fn register(lua: &Lua, dstest: &Table, _: &BindingContext<S>) -> Result<()> {
         let debug_fn = lua.create_function(|_, msg: String| {
             tracing::debug!("{}", msg);
             Ok(())

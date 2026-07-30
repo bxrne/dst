@@ -1,10 +1,20 @@
 --- @diagnostic disable:undefined-global
---- dstest - Oracle example with predicates and invariants
+--- Oracle-driven chaos experiment: predicates + invariants during fault injection.
+--- Run: cat examples/oracle.lua | cargo run
 
 dstest.config({
     substrate = "docker",
     seed = 999,
-    weights = { pause = 0.5, kill = 0.5 },
+    weights = {
+        pause = 0.3,
+        kill = 0.3,
+        ["deprive:memory"] = 0.2,
+        ["deprive:cpu"] = 0.2,
+    },
+    accumulation = "single",
+    step_delay = 200,
+    http_retries = 10,
+    http_retry_delay = 200,
 })
 
 local s = dstest.setup({
@@ -12,7 +22,8 @@ local s = dstest.setup({
     ports = { 80 },
 })
 
-dstest.oracle.predicate("get_endpoint", function(subject, fault, round)
+-- Predicate: /get must stay healthy during non-fatal faults
+dstest.oracle.predicate("get_healthy", function(subject, fault, round)
     if fault == "pause" or fault == "kill" then
         return true
     end
@@ -21,21 +32,21 @@ dstest.oracle.predicate("get_endpoint", function(subject, fault, round)
         return { false, "request failed: " .. tostring(resp) }
     end
     if resp.status ~= 200 then
-        return { false, "status " .. resp.status }
+        return { false, "expected 200, got " .. resp.status }
     end
     return true
 end)
 
-dstest.oracle.predicate("status_404", function(subject, fault, round)
-    if fault == "pause" or fault == "kill" then
-        return true
-    end
-    local ok, resp = pcall(dstest.http, subject, "GET", "/status/404")
+-- Invariant: response time must stay under 500ms
+dstest.oracle.invariant("response_time_under_500ms", function()
+    local start = dstest.clock()
+    local ok, resp = pcall(dstest.http, s, "GET", "/get")
+    local elapsed = (dstest.clock().nanos - start.nanos) / 1e6
     if not ok then
-        return { false, "request failed: " .. tostring(resp) }
+        return { false, "request failed" }
     end
-    if resp.status ~= 404 then
-        return { false, "expected 404, got " .. resp.status }
+    if elapsed > 500 then
+        return { false, string.format("response time %.0fms exceeds 500ms", elapsed) }
     end
     return true
 end)
@@ -43,22 +54,30 @@ end)
 dstest.info("running oracle experiment")
 
 local report = dstest.oracle.run(function()
-    local results = dstest.run_steps(5)
+    local results = dstest.run_steps(8)
     for _, r in ipairs(results) do
-        dstest.info(string.format("round %d: %s", r.round, r.fault))
+        dstest.info(string.format("round %d: %s on %s", r.round, r.fault, r.subject))
     end
 end)
 
-dstest.info(string.format("oracle report: passed=%s total=%d passed=%d failed=%d",
-    report.passed, report.total_checks, report.passed_checks, report.failed_checks))
+dstest.info(string.format(
+    "report: passed=%s total=%d passed=%d failed=%d",
+    tostring(report.passed),
+    report.total_checks,
+    report.passed_checks,
+    report.failed_checks
+))
 
 if not report.passed then
-    dstest.warn("oracle failures detected:")
+    dstest.warn("oracle failures:")
     for _, f in ipairs(report.failures) do
-        dstest.warn(string.format("  [%s] %s:%s %s", f.type, f.name, 
-            f.round and (" round=" .. f.round) or "", f.error))
+        dstest.warn(string.format("  [%s] %s: %s", f.type, f.name, f.error))
     end
 end
 
+-- Confirm final container state
+local info = dstest.inspect(s)
+dstest.info(string.format("final state: %s", info.state))
+
 dstest.clear(s)
-dstest.info("oracle experiment complete")
+dstest.info("oracle example complete")

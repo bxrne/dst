@@ -1,16 +1,14 @@
 use mlua::{Lua, Result, Table};
 
-use crate::bindings::{LuaModule, context::BindingContext};
+use crate::bindings::LuaModule;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Clock;
 
-impl LuaModule for Clock {
-    fn namespace() -> &'static str {
-        "clock"
-    }
-
-    fn register(lua: &Lua, dstest: &Table, _ctx: &BindingContext) -> Result<()> {
+impl<S: Substrate> LuaModule<S> for Clock {
+    fn register(lua: &Lua, dstest: &Table, _ctx: &BindingContext<S>) -> Result<()> {
         let clock_fn = lua.create_function(move |lua, _: ()| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)

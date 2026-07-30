@@ -1,13 +1,19 @@
-use crate::bindings::{BindingContext, register_all};
+use crate::bindings::register_all;
+use crate::substrate::Substrate;
 use tracing::{debug, warn};
 
-pub struct Engine {
-    ctx: BindingContext,
+pub mod context;
+pub mod state;
+
+pub use context::BindingContext;
+
+pub struct Engine<S: Substrate> {
+    ctx: BindingContext<S>,
 }
 
-impl Engine {
-    pub fn new() -> Self {
-        let ctx = BindingContext::new();
+impl<S: Substrate> Engine<S> {
+    pub fn new(substrate: S) -> Self {
+        let ctx = BindingContext::new(substrate);
         let globals = ctx.lua.globals();
         let dstest = ctx
             .lua
@@ -32,19 +38,12 @@ impl Engine {
         Engine { ctx }
     }
 
-    // Changed: Made async and switched from .exec() to .call_async()
     pub async fn execute(&self, script: &str) -> mlua::Result<()> {
         self.ctx.lua.load(script).call_async::<()>(()).await
     }
 }
 
-impl Default for Engine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for Engine {
+impl<S: Substrate> Drop for Engine<S> {
     fn drop(&mut self) {
         let subjects = {
             let mut state = self.ctx.state.lock().expect("poisoned engine state lock");

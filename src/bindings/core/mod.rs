@@ -1,24 +1,18 @@
 mod opts;
 mod setup;
 
+use mlua::Lua;
+
 use crate::bindings::LuaModule;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 
 pub struct Core;
 
-impl LuaModule for Core {
-    fn namespace() -> &'static str {
-        "core"
-    }
-
-    fn register(
-        lua: &mlua::Lua,
-        dstest: &mlua::Table,
-        ctx: &crate::bindings::context::BindingContext,
-    ) -> mlua::Result<()> {
-        let core_table = lua.create_table()?;
-        opts::register(lua, &core_table, ctx)?;
-        setup::register(lua, &core_table, ctx)?;
-        dstest.set(Self::namespace(), core_table)?;
+impl<S: Substrate> LuaModule<S> for Core {
+    fn register(lua: &Lua, dstest: &mlua::Table, ctx: &BindingContext<S>) -> mlua::Result<()> {
+        opts::register(lua, dstest, ctx)?;
+        setup::register(lua, dstest, ctx)?;
         Ok(())
     }
 }

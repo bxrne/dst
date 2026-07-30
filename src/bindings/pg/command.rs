@@ -1,5 +1,6 @@
-use crate::bindings::context::BindingContext;
 use crate::bindings::pg::pool::LuaPgPool;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 use mlua::{Lua, Result, Table, Value};
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{Column, Row, TypeInfo};
@@ -48,11 +49,7 @@ fn pg_cell_to_lua_value(lua: &Lua, row: &PgRow, index: usize) -> Result<Value> {
     }
 }
 
-pub fn register(lua: &Lua, dstest: &Table, _ctx: &BindingContext) -> Result<()> {
-    let pg_table = lua.create_table()?;
-
-    // Fixed: Changed from create_function to create_async_function
-    // Removed the internal runtime builder and block_on call completely
+pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, _ctx: &BindingContext<S>) -> Result<()> {
     let connect_fn = lua.create_async_function(
         |_, (conn_str, max_conns): (String, Option<u32>)| async move {
             info!("Connecting to PostgreSQL database: {}", conn_str);
@@ -102,11 +99,9 @@ pub fn register(lua: &Lua, dstest: &Table, _ctx: &BindingContext) -> Result<()> 
         Ok(())
     })?;
 
-    pg_table.set("connect", connect_fn)?;
-    pg_table.set("query", query_fn)?;
-    pg_table.set("close", close_fn)?;
-
-    dstest.set("pg", pg_table)?;
+    dstest.set("connect", connect_fn)?;
+    dstest.set("query", query_fn)?;
+    dstest.set("close", close_fn)?;
 
     Ok(())
 }

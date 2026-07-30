@@ -1,5 +1,4 @@
 mod clock;
-mod context;
 mod core;
 mod dst;
 mod log;
@@ -7,20 +6,20 @@ mod net;
 mod pg;
 mod subs;
 
-pub use context::BindingContext;
-
 use mlua::{Lua, Table};
 
-pub trait LuaModule {
-    /// The namespace key used in Lua (e.g., "http", "pg", "clock")
-    fn namespace() -> &'static str;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 
-    /// Register functions, types, or state into the Lua environment
-    fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> mlua::Result<()>;
+pub trait LuaModule<S: Substrate> {
+    fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> mlua::Result<()>;
 }
 
-pub fn register_all(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> mlua::Result<()> {
-    // Modules
+pub fn register_all<S: Substrate>(
+    lua: &Lua,
+    dstest: &Table,
+    ctx: &BindingContext<S>,
+) -> mlua::Result<()> {
     net::Net::register(lua, dstest, ctx)?;
     dst::Dst::register(lua, dstest, ctx)?;
     subs::Subs::register(lua, dstest, ctx)?;

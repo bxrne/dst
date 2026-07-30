@@ -1,14 +1,13 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mlua::{Lua, Result, Table};
 
-use crate::bindings::context::BindingContext;
-use crate::substrate::docker::DockerSubjectData;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 
-pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
+pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let state = Arc::clone(&ctx.state);
-    let docker = Arc::clone(&ctx.docker);
+    let substrate = Arc::clone(&ctx.substrate);
     let config = Arc::clone(&ctx.config);
 
     let setup = lua.create_function(move |lua, args: mlua::MultiValue| {
@@ -42,46 +41,33 @@ pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
                         .to_string(),
                 )
             })?;
+        drop(cfg);
 
-        match substrate_name.as_str() {
-            "docker" => {
-                let image: String = config_tbl.get("image")?;
-                let ports: Option<Vec<u16>> = config_tbl.get("ports").ok();
-                let cmd: Option<Vec<String>> = config_tbl.get("cmd").ok();
-                let volumes: Option<Vec<String>> = config_tbl.get("volumes").ok();
-                let env: Option<HashMap<String, String>> = config_tbl.get("env").ok();
-                let env = env.map(|e| e.into_iter().map(|(k, v)| format!("{}={}", k, v)).collect());
-
-                let data = DockerSubjectData {
-                    image,
-                    cmd,
-                    ports,
-                    volumes,
-                    env,
-                };
-
-                let container_id = docker.host(&data).map_err(mlua::Error::RuntimeError)?;
-
-                let mut state = state.lock().expect("poisoned engine state lock");
-
-                if let Some(ref p) = data.ports.as_ref().and_then(|ports| ports.first()) {
-                    state.subject_hosts.insert(
-                        format!("docker/{}", container_id),
-                        format!("localhost:{}", p),
-                    );
-                }
-
-                state
-                    .subjects
-                    .push((format!("docker/{}", container_id), data));
-
-                Ok(format!("docker/{}", container_id))
-            }
-            _ => Err(mlua::Error::RuntimeError(format!(
-                "unknown substrate type: {}",
-                substrate_name
-            ))),
+        if substrate_name != S::NAME {
+            return Err(mlua::Error::RuntimeError(format!(
+                "substrate mismatch: config wants \"{}\" but engine was built for \"{}\"",
+                substrate_name,
+                S::NAME
+            )));
         }
+
+        let data = substrate
+            .parse_subject(&config_tbl)
+            .map_err(mlua::Error::RuntimeError)?;
+
+        let hosted = substrate.host(&data).map_err(mlua::Error::RuntimeError)?;
+
+        let subject_id = format!("{}/{}", S::NAME, hosted.id);
+
+        let mut state = state.lock().expect("poisoned engine state lock");
+
+        if let Some(addr) = hosted.addr {
+            state.subject_hosts.insert(subject_id.clone(), addr);
+        }
+
+        state.subjects.push((subject_id.clone(), data));
+
+        Ok(subject_id)
     })?;
 
     dstest.set("setup", setup)?;

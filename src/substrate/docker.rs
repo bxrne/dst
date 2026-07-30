@@ -19,11 +19,11 @@ use futures_util::TryStreamExt;
 use tracing::{debug, info, warn};
 
 use crate::substrate::{
-    ContainerState, ExecResult, Fault, InspectResult, LogEntry, LogOptions, Stream, Subject,
-    Substrate,
+    ContainerState, ExecResult, Fault, HostedSubject, InspectResult, LogEntry, LogOptions, Stream,
+    Subject, Substrate,
 };
 
-fn runtime() -> &'static tokio::runtime::Runtime {
+pub fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| tokio::runtime::Runtime::new().expect("Failed to create tokio runtime"))
 }
@@ -39,21 +39,70 @@ impl Docker {
         Ok(Self { connection })
     }
 
-    pub fn host(&self, data: &DockerSubjectData) -> Result<String, String> {
+    fn block_on<F, Fut, T>(&self, f: F) -> T
+    where
+        F: FnOnce(BollardDocker) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let conn = self.connection.clone();
         let rt = runtime();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = rt.block_on(f(conn));
+            let _ = tx.send(result);
+        });
+        rx.recv().expect("docker operation thread panicked")
+    }
+}
 
-        rt.block_on(
-            self.connection
-                .create_image(
-                    Some(CreateImageOptions {
-                        from_image: Some(data.image.clone()),
-                        ..Default::default()
-                    }),
-                    None,
-                    None,
-                )
-                .try_collect::<Vec<_>>(),
-        )
+#[derive(Clone, Debug)]
+pub struct DockerSubjectData {
+    pub image: String,
+    pub cmd: Option<Vec<String>>,
+    pub ports: Option<Vec<u16>>,
+    pub volumes: Option<Vec<String>>,
+    pub env: Option<Vec<String>>,
+}
+
+impl Substrate for Docker {
+    const NAME: &'static str = "docker";
+
+    type SubjectData = DockerSubjectData;
+
+    fn parse_subject(&self, table: &mlua::Table) -> Result<Self::SubjectData, String> {
+        let image: String = table
+            .get("image")
+            .map_err(|_| "setup requires `image` field".to_string())?;
+        let ports: Option<Vec<u16>> = table.get("ports").ok();
+        let cmd: Option<Vec<String>> = table.get("cmd").ok();
+        let volumes: Option<Vec<String>> = table.get("volumes").ok();
+        let env: Option<HashMap<String, String>> = table.get("env").ok();
+        let env = env.map(|e| e.into_iter().map(|(k, v)| format!("{}={}", k, v)).collect());
+
+        Ok(DockerSubjectData {
+            image,
+            cmd,
+            ports,
+            volumes,
+            env,
+        })
+    }
+
+    fn host(&self, data: &Self::SubjectData) -> Result<HostedSubject, String> {
+        let image = data.image.clone();
+        self.block_on(|conn| async move {
+            conn.create_image(
+                Some(CreateImageOptions {
+                    from_image: Some(image),
+                    ..Default::default()
+                }),
+                None,
+                None,
+            )
+            .try_collect::<Vec<_>>()
+            .await
+        })
         .map_err(|e| format!("Failed to pull image: {}", e))?;
 
         let container_config = ContainerCreateBody {
@@ -84,57 +133,62 @@ impl Docker {
             ..Default::default()
         };
 
-        let container = rt
-            .block_on(
-                self.connection
-                    .create_container(None::<CreateContainerOptions>, container_config),
-            )
+        let container_config_clone = container_config.clone();
+        let container = self
+            .block_on(|conn| async move {
+                conn.create_container(None::<CreateContainerOptions>, container_config_clone)
+                    .await
+            })
             .map_err(|e| format!("Failed to create container: {}", e))?;
 
-        rt.block_on(
-            self.connection
-                .start_container(&container.id, None::<StartContainerOptions>),
-        )
+        let container_id = container.id.clone();
+        let container_id_clone = container_id.clone();
+        self.block_on(|conn| async move {
+            conn.start_container(&container_id_clone, None::<StartContainerOptions>)
+                .await
+        })
         .map_err(|e| format!("Failed to start container: {}", e))?;
 
+        let addr = data
+            .ports
+            .as_ref()
+            .and_then(|ports| ports.first())
+            .map(|p| format!("localhost:{}", p));
+
         info!("Started container id={}", container.id);
-        Ok(container.id.clone())
+        Ok(HostedSubject {
+            id: container.id,
+            addr,
+        })
     }
-}
 
-#[derive(Clone, Debug)]
-pub struct DockerSubjectData {
-    pub image: String,
-    pub cmd: Option<Vec<String>>,
-    pub ports: Option<Vec<u16>>,
-    pub volumes: Option<Vec<String>>,
-    pub env: Option<Vec<String>>,
-}
-
-impl Substrate for Docker {
     fn affect(&self, subject: &Subject, fault: &Fault) -> Result<(), String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
 
         match fault {
-            Fault::Pause => match rt.block_on(self.connection.pause_container(id)) {
-                Ok(_) => info!("Paused container id={}", id),
-                Err(BollardError::DockerResponseServerError {
-                    status_code: 409, ..
-                }) => {
-                    debug!("Container id={} already paused", id);
+            Fault::Pause => {
+                let id_for_call = id.clone();
+                match self.block_on(|conn| async move { conn.pause_container(&id_for_call).await })
+                {
+                    Ok(_) => info!("Paused container id={}", id),
+                    Err(BollardError::DockerResponseServerError {
+                        status_code: 409, ..
+                    }) => debug!("Container id={} already paused", id),
+                    Err(e) => return Err(format!("Failed to pause container {}: {}", id, e)),
                 }
-                Err(e) => return Err(format!("Failed to pause container {}: {}", id, e)),
-            },
-            Fault::Kill => match rt.block_on(self.connection.kill_container(id, None)) {
-                Ok(_) => info!("Killed container id={}", id),
-                Err(BollardError::DockerResponseServerError {
-                    status_code: 409, ..
-                }) => {
-                    debug!("Container id={} not running", id);
+            }
+            Fault::Kill => {
+                let id_for_call = id.clone();
+                match self
+                    .block_on(|conn| async move { conn.kill_container(&id_for_call, None).await })
+                {
+                    Ok(_) => info!("Killed container id={}", id),
+                    Err(BollardError::DockerResponseServerError {
+                        status_code: 409, ..
+                    }) => debug!("Container id={} not running", id),
+                    Err(e) => return Err(format!("Failed to kill container {}: {}", id, e)),
                 }
-                Err(e) => return Err(format!("Failed to kill container {}: {}", id, e)),
-            },
+            }
             Fault::Deprive(tier) => {
                 info!("Depriving container id={} tier={}", id, tier);
                 self.deprive_resource(subject, tier)?;
@@ -144,11 +198,11 @@ impl Substrate for Docker {
     }
 
     fn clear_faults(&self, subject: &Subject) -> Result<(), String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
         info!("Clearing faults id={}", id);
 
-        match rt.block_on(self.connection.unpause_container(id)) {
+        let id_for_call = id.clone();
+        match self.block_on(|conn| async move { conn.unpause_container(&id_for_call).await }) {
             Ok(_) => debug!("Unpaused container id={}", id),
             Err(BollardError::DockerResponseServerError {
                 status_code: 409, ..
@@ -167,11 +221,11 @@ impl Substrate for Docker {
     }
 
     fn teardown(&self, subject: Subject) -> Result<(), String> {
-        let id = Self::container_id(&subject);
+        let id = Self::container_id(&subject).to_string();
         info!("Tearing down container id={}", id);
 
-        let rt = runtime();
-        rt.block_on(self.connection.stop_container(id, None))
+        let id_for_call = id.clone();
+        self.block_on(|conn| async move { conn.stop_container(&id_for_call, None).await })
             .map_err(|e| format!("Failed to stop container: {}", e))?;
 
         let options = RemoveContainerOptions {
@@ -179,15 +233,14 @@ impl Substrate for Docker {
             force: true,
             link: false,
         };
-        rt.block_on(self.connection.remove_container(id, Some(options)))
+        self.block_on(|conn| async move { conn.remove_container(&id, Some(options)).await })
             .map_err(|e| format!("Failed to remove container: {}", e))?;
 
         Ok(())
     }
 
     fn logs(&self, subject: &Subject, opts: LogOptions) -> Result<Vec<LogEntry>, String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
 
         let mut builder = LogsOptionsBuilder::new()
             .stdout(opts.stdout)
@@ -203,11 +256,9 @@ impl Substrate for Docker {
 
         let options = builder.build();
 
-        let stream = rt
+        let stream = self
             .block_on(
-                self.connection
-                    .logs(id, Some(options))
-                    .try_collect::<Vec<_>>(),
+                |conn| async move { conn.logs(&id, Some(options)).try_collect::<Vec<_>>().await },
             )
             .map_err(|e| format!("Failed to get logs: {}", e))?;
 
@@ -231,14 +282,13 @@ impl Substrate for Docker {
     }
 
     fn inspect(&self, subject: &Subject) -> Result<InspectResult, String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
 
-        let info = rt
-            .block_on(
-                self.connection
-                    .inspect_container(id, None::<InspectContainerOptions>),
-            )
+        let info = self
+            .block_on(|conn| async move {
+                conn.inspect_container(&id, None::<InspectContainerOptions>)
+                    .await
+            })
             .map_err(|e| format!("Inspect failed: {}", e))?;
 
         let state = match info.state.as_ref().and_then(|s| s.status) {
@@ -274,31 +324,37 @@ impl Substrate for Docker {
     }
 
     fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
+        let cmd: Vec<String> = cmd.to_vec();
 
-        let config = CreateExecOptions {
-            attach_stdout: Some(true),
-            attach_stderr: Some(true),
-            cmd: Some(cmd.iter().map(|s| s.as_str()).collect()),
-            ..Default::default()
-        };
-
-        let exec = rt
-            .block_on(self.connection.create_exec(id, config))
+        let exec = self
+            .block_on(move |conn| {
+                let id = id;
+                let cmd = cmd;
+                async move {
+                    let config = CreateExecOptions {
+                        attach_stdout: Some(true),
+                        attach_stderr: Some(true),
+                        cmd: Some(cmd.iter().map(|s| s.as_str()).collect()),
+                        ..Default::default()
+                    };
+                    conn.create_exec(&id, config).await
+                }
+            })
             .map_err(|e| format!("Create exec failed: {}", e))?;
 
-        let result = rt
-            .block_on(
-                self.connection
-                    .start_exec(&exec.id, Some(StartExecOptions::default())),
-            )
+        let exec_id = exec.id.clone();
+        let result = self
+            .block_on(|conn| async move {
+                conn.start_exec(&exec_id, Some(StartExecOptions::default()))
+                    .await
+            })
             .map_err(|e| format!("Start exec failed: {}", e))?;
 
         let (stdout, stderr) = match result {
             StartExecResults::Attached { output, .. } => {
-                let entries = rt
-                    .block_on(output.try_collect::<Vec<_>>())
+                let entries = self
+                    .block_on(|_conn| async move { output.try_collect::<Vec<_>>().await })
                     .map_err(|e| format!("Exec output failed: {}", e))?;
 
                 let mut stdout = String::new();
@@ -320,8 +376,9 @@ impl Substrate for Docker {
             StartExecResults::Detached => (String::new(), String::new()),
         };
 
-        let inspect = rt
-            .block_on(self.connection.inspect_exec(&exec.id))
+        let exec_id = exec.id.clone();
+        let inspect = self
+            .block_on(|conn| async move { conn.inspect_exec(&exec_id).await })
             .map_err(|e| format!("Inspect exec failed: {}", e))?;
 
         Ok(ExecResult {
@@ -362,8 +419,7 @@ impl Docker {
     }
 
     fn deprive_resource(&self, subject: &Subject, tier: &crate::fault::Tier) -> Result<(), String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
 
         match tier {
             crate::fault::Tier::Disk => {
@@ -397,16 +453,20 @@ impl Docker {
                     }]),
                     ..Default::default()
                 };
-                rt.block_on(self.connection.update_container(id, update_config))
-                    .map_err(|e| format!("Failed to throttle disk: {}", e))?;
+                self.block_on(
+                    |conn| async move { conn.update_container(&id, update_config).await },
+                )
+                .map_err(|e| format!("Failed to throttle disk: {}", e))?;
             }
             crate::fault::Tier::Network => {
                 info!("Disconnecting network for container id={}", id);
                 let disconnect = NetworkDisconnectRequest {
-                    container: id.to_string(),
+                    container: id.clone(),
                     force: Some(true),
                 };
-                match rt.block_on(self.connection.disconnect_network("bridge", disconnect)) {
+                match self.block_on(|conn| async move {
+                    conn.disconnect_network("bridge", disconnect).await
+                }) {
                     Ok(_) => info!("Container disconnected from bridge network"),
                     Err(e) => {
                         warn!(
@@ -417,11 +477,15 @@ impl Docker {
                 }
             }
             crate::fault::Tier::Memory => {
-                let container_info = rt
-                    .block_on(self.connection.inspect_container(
-                        id,
-                        None::<bollard::query_parameters::InspectContainerOptions>,
-                    ))
+                let id_for_inspect = id.clone();
+                let container_info = self
+                    .block_on(|conn| async move {
+                        conn.inspect_container(
+                            &id_for_inspect,
+                            None::<bollard::query_parameters::InspectContainerOptions>,
+                        )
+                        .await
+                    })
                     .map_err(|e| format!("Failed to inspect container: {}", e))?;
 
                 let current_limit = container_info
@@ -447,8 +511,11 @@ impl Docker {
                     memory_swap: Some(new_limit),
                     ..Default::default()
                 };
-                rt.block_on(self.connection.update_container(id, update_config))
-                    .map_err(|e| format!("Failed to limit memory: {}", e))?;
+                let id_for_update = id.clone();
+                self.block_on(|conn| async move {
+                    conn.update_container(&id_for_update, update_config).await
+                })
+                .map_err(|e| format!("Failed to limit memory: {}", e))?;
             }
             crate::fault::Tier::Cpu => {
                 info!("Throttling CPU for container id={}", id);
@@ -457,8 +524,10 @@ impl Docker {
                     cpu_quota: Some(20000),
                     ..Default::default()
                 };
-                rt.block_on(self.connection.update_container(id, update_config))
-                    .map_err(|e| format!("Failed to throttle CPU: {}", e))?;
+                self.block_on(
+                    |conn| async move { conn.update_container(&id, update_config).await },
+                )
+                .map_err(|e| format!("Failed to throttle CPU: {}", e))?;
             }
         }
 
@@ -466,22 +535,29 @@ impl Docker {
     }
 
     fn restart_if_killed(&self, subject: &Subject) -> Result<(), String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
+        let id_for_inspect = id.clone();
 
-        match rt.block_on(self.connection.inspect_container(
-            id,
-            None::<bollard::query_parameters::InspectContainerOptions>,
-        )) {
+        match self.block_on(|conn| async move {
+            conn.inspect_container(
+                &id_for_inspect,
+                None::<bollard::query_parameters::InspectContainerOptions>,
+            )
+            .await
+        }) {
             Ok(container) => {
                 if let Some(state) = container.state
                     && state.status == Some(ContainerStateStatusEnum::EXITED)
                 {
                     info!("Restarting killed container id={}", id);
-                    rt.block_on(self.connection.restart_container(
-                        id,
-                        None::<bollard::query_parameters::RestartContainerOptions>,
-                    ))
+                    let id_for_restart = id.clone();
+                    self.block_on(|conn| async move {
+                        conn.restart_container(
+                            &id_for_restart,
+                            None::<bollard::query_parameters::RestartContainerOptions>,
+                        )
+                        .await
+                    })
                     .map_err(|e| format!("Failed to restart container: {}", e))?;
                 }
             }
@@ -494,15 +570,14 @@ impl Docker {
     }
 
     fn reconnect_network(&self, subject: &Subject) -> Result<(), String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
 
         let connect = NetworkConnectRequest {
-            container: id.to_string(),
+            container: id.clone(),
             endpoint_config: None,
         };
 
-        match rt.block_on(self.connection.connect_network("bridge", connect)) {
+        match self.block_on(|conn| async move { conn.connect_network("bridge", connect).await }) {
             Ok(_) => info!("Reconnected container to bridge network"),
             Err(e) => {
                 debug!(
@@ -516,8 +591,7 @@ impl Docker {
     }
 
     fn clear_resource_limits(&self, subject: &Subject) -> Result<(), String> {
-        let rt = runtime();
-        let id = Self::container_id(subject);
+        let id = Self::container_id(subject).to_string();
 
         let update_config = ContainerUpdateBody {
             blkio_weight: None,
@@ -530,7 +604,10 @@ impl Docker {
             ..Default::default()
         };
 
-        match rt.block_on(self.connection.update_container(id, update_config)) {
+        let id_for_update = id.clone();
+        match self.block_on(|conn| async move {
+            conn.update_container(&id_for_update, update_config).await
+        }) {
             Ok(_) => debug!("Cleared resource limits for container id={}", id),
             Err(BollardError::DockerResponseServerError {
                 status_code: 404, ..

@@ -1,23 +1,19 @@
+use mlua::Lua;
+
 use crate::bindings::LuaModule;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 
 mod command;
 mod pool;
 
 pub struct Pg;
 
-impl LuaModule for Pg {
-    fn namespace() -> &'static str {
-        "pg"
-    }
-
-    fn register(
-        lua: &mlua::Lua,
-        dstest: &mlua::Table,
-        ctx: &crate::bindings::context::BindingContext,
-    ) -> mlua::Result<()> {
+impl<S: Substrate> LuaModule<S> for Pg {
+    fn register(lua: &Lua, dstest: &mlua::Table, ctx: &BindingContext<S>) -> mlua::Result<()> {
         let pg_table = lua.create_table()?;
         command::register(lua, &pg_table, ctx)?;
-        dstest.set(Self::namespace(), pg_table)?;
+        dstest.set("pg", pg_table)?;
         Ok(())
     }
 }

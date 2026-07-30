@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use mlua::Lua;
@@ -62,9 +64,13 @@ impl OracleReport {
     }
 }
 
+type PredicateFut<'a> =
+    Pin<Box<dyn Future<Output = Result<(bool, Option<String>), mlua::Error>> + 'a>>;
+type InvariantFut<'a> =
+    Pin<Box<dyn Future<Output = Result<(bool, Option<String>), mlua::Error>> + 'a>>;
 pub type PredicateFn =
-    Box<dyn Fn(&Lua, String, String, usize) -> Result<(bool, Option<String>), mlua::Error> + Send>;
-pub type InvariantFn = Box<dyn Fn(&Lua) -> Result<(bool, Option<String>), mlua::Error> + Send>;
+    Box<dyn for<'a> Fn(&'a Lua, String, String, usize) -> PredicateFut<'a> + Send + Sync>;
+pub type InvariantFn = Box<dyn for<'a> Fn(&'a Lua) -> InvariantFut<'a> + Send + Sync>;
 
 pub struct Oracle {
     pub predicates: HashMap<String, PredicateFn>,
@@ -91,7 +97,7 @@ impl Oracle {
         self.invariants.insert(name, func);
     }
 
-    pub fn check_predicates(
+    pub async fn check_predicates(
         &mut self,
         lua: &Lua,
         subject_id: &str,
@@ -102,7 +108,7 @@ impl Oracle {
         report.passed = true;
 
         for (name, predicate) in &self.predicates {
-            match predicate(lua, subject_id.to_string(), fault.to_string(), round) {
+            match predicate(lua, subject_id.to_string(), fault.to_string(), round).await {
                 Ok((true, _)) => {
                     report.add_pass();
                 }
@@ -142,12 +148,12 @@ impl Oracle {
         report
     }
 
-    pub fn check_invariants(&mut self, lua: &Lua) -> OracleReport {
+    pub async fn check_invariants(&mut self, lua: &Lua) -> OracleReport {
         let mut report = OracleReport::new();
         report.passed = true;
 
         for (name, invariant) in &self.invariants {
-            match invariant(lua) {
+            match invariant(lua).await {
                 Ok((true, _)) => {
                     report.add_pass();
                 }
@@ -187,7 +193,7 @@ impl Oracle {
         report
     }
 
-    pub fn check_all(
+    pub async fn check_all(
         &mut self,
         lua: &Lua,
         subject_id: &str,
@@ -197,10 +203,10 @@ impl Oracle {
         let mut report = OracleReport::new();
         report.passed = true;
 
-        let pred_report = self.check_predicates(lua, subject_id, fault, round);
+        let pred_report = self.check_predicates(lua, subject_id, fault, round).await;
         report.merge(&pred_report);
 
-        let inv_report = self.check_invariants(lua);
+        let inv_report = self.check_invariants(lua).await;
         report.merge(&inv_report);
 
         report

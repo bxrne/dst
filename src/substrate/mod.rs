@@ -75,6 +75,42 @@ pub struct ExecResult {
     pub stderr: String,
 }
 
+/// The result of hosting a subject: its instance id and an optional
+/// reachable address (e.g. `"localhost:8080"`). Each substrate decides
+/// what address format makes sense — Docker returns a host port mapping,
+/// a future k8s substrate could return a service DNS name.
+pub struct HostedSubject {
+    pub id: String,
+    pub addr: Option<String>,
+}
+
+pub trait Substrate: Send + Sync + 'static {
+    /// Human-readable substrate name (e.g. `"docker"`), matched against the
+    /// `substrate` field of `dstest.config()`.
+    const NAME: &'static str;
+
+    /// Substrate-specific data describing how to host a subject.
+    type SubjectData: Clone + Send + Sync + 'static;
+
+    /// Parse the Lua table from `dstest.setup()` into this substrate's
+    /// `SubjectData`. Each substrate owns its own config schema — Docker
+    /// reads `image`/`ports`/`volumes`/`env`/`cmd`, other substrates can
+    /// read whatever fields they need.
+    fn parse_subject(&self, table: &mlua::Table) -> Result<Self::SubjectData, String>;
+
+    /// Pull/create/start a subject and return its instance id plus an
+    /// optional reachable address.
+    fn host(&self, data: &Self::SubjectData) -> Result<HostedSubject, String>;
+
+    fn affect(&self, subject: &Subject, fault: &Fault) -> Result<(), String>;
+    fn clear_faults(&self, subject: &Subject) -> Result<(), String>;
+    fn teardown(&self, subject: Subject) -> Result<(), String>;
+
+    fn logs(&self, subject: &Subject, opts: LogOptions) -> Result<Vec<LogEntry>, String>;
+    fn inspect(&self, subject: &Subject) -> Result<InspectResult, String>;
+    fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String>;
+}
+
 #[derive(Clone, Debug)]
 pub struct LogOptions {
     pub stdout: bool,
@@ -94,16 +130,6 @@ impl Default for LogOptions {
             timestamps: false,
         }
     }
-}
-
-pub trait Substrate {
-    fn affect(&self, subject: &Subject, fault: &Fault) -> Result<(), String>;
-    fn clear_faults(&self, subject: &Subject) -> Result<(), String>;
-    fn teardown(&self, subject: Subject) -> Result<(), String>;
-
-    fn logs(&self, subject: &Subject, opts: LogOptions) -> Result<Vec<LogEntry>, String>;
-    fn inspect(&self, subject: &Subject) -> Result<InspectResult, String>;
-    fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String>;
 }
 
 #[cfg(test)]

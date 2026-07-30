@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use mlua::{Lua, Result, Table, UserData, UserDataMethods};
 
-use crate::bindings::context::BindingContext;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 
 struct TcpConnection {
     reader: Mutex<BufReader<TcpStream>>,
@@ -135,7 +136,7 @@ impl UserData for TcpConnection {
     }
 }
 
-pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
+pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let state = Arc::clone(&ctx.state);
     let config = Arc::clone(&ctx.config);
 

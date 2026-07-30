@@ -4,7 +4,7 @@ description: Deterministic simulation testing for containerized services. Write 
 license: MIT
 metadata:
   author: bxrne
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # dstest
@@ -15,7 +15,7 @@ dstest is a deterministic chaos testing framework for Docker containers. Write L
 
 ```bash
 # Run an example
-cat examples/basic.lua | cargo run
+cat examples/httpbin.lua | cargo run
 
 # Build and install
 cargo build --release
@@ -26,11 +26,11 @@ cargo install --path .
 
 | Command | Purpose |
 |---------|---------|
-| `cargo doc --open` | Open API documentation |
-| `cat examples/basic.lua \| cargo run` | Run a script via stdin |
+| `cat examples/httpbin.lua \| cargo run` | Run a script via stdin |
 | `dstest < script.lua` | Run script (after install) |
 | `cargo test` | Run test suite |
-| `cargo clippy -- -D warnings` | Lint check |
+| `cargo clippy -- -D warnings` | Lint gate (CI-enforced) |
+| `cargo doc --open` | Open API docs |
 
 ## Available Faults
 
@@ -45,13 +45,14 @@ cargo install --path .
 
 ## Configuration
 
-Call `dstest.config()` first to set substrate and seed. Then `dstest.setup()` uses those settings.
+Call `dstest.config()` first, then `dstest.setup()`. Full field reference:
+[`src/bindings/core/README.md`](src/bindings/core/README.md).
 
 ```lua
 dstest.config({
-    substrate = "docker",      -- Required: only "docker" supported
+    substrate = "docker",      -- Required: must match the engine's compiled substrate
     seed = 42,                 -- Required: random seed for determinism
-    weights = {                -- Optional: fault weights (default below)
+    weights = {                -- Optional: fault weights (defaults below)
         pause = 0.35,
         kill = 0.25,
         ["deprive:disk"] = 0.10,
@@ -63,44 +64,37 @@ dstest.config({
     http_timeout = 5,          -- HTTP timeout in seconds
     http_retries = 30,         -- HTTP retry attempts
     http_retry_delay = 500,    -- Delay between retries (ms)
-    step_delay = 1000,         -- Delay before fault (ms)
+    step_delay = 1000,         -- Delay before fault in single mode (ms)
 })
 ```
 
 ## Core API
 
 ```lua
--- Create a subject (container)
--- Substrate type comes from dstest.config({ substrate = "docker" })
 local s = dstest.setup({
     image = "kennethreitz/httpbin",
     ports = { 80 },
-    volumes = { "/absolute/host/path:/container:ro" },  -- must be absolute
+    volumes = { "/absolute/host/path:/container:ro" },
     env = { DEBUG = "true" },
     cmd = { "python", "-m", "httpbin" },
 })
 
--- Inject faults
-local result = dstest.step()           -- Single fault
-local results = dstest.run_steps(5)    -- Multiple faults
-
--- HTTP requests
+local result = dstest.step()        -- Single fault
+local results = dstest.run_steps(5) -- Multiple faults
+dstest.clear(s)                     -- Clear active faults
 local resp = dstest.http(s, "GET", "/get")
-print(resp.status, resp.body)
-
--- Clear faults
-dstest.clear(s)
 ```
+
+For the full API reference (oracle, tcp, pg, inspect, logs, exec, clock, logging),
+see the per-module READMEs linked from [`src/bindings/README.md`](src/bindings/README.md).
 
 ## Oracle (Automated Verification)
 
 ```lua
 dstest.oracle.predicate("health_check", function(subject, fault, round)
-    if fault == "pause" or fault == "kill" then
-        return true  -- Skip during these faults
-    end
-    local resp = dstest.http(subject, "GET", "/health")
-    return resp.status == 200
+    if fault == "pause" or fault == "kill" then return true end
+    local ok, resp = pcall(dstest.http, subject, "GET", "/health")
+    return ok and resp.status == 200
 end)
 
 local report = dstest.oracle.run(function()
@@ -110,6 +104,8 @@ end)
 print(report.passed, report.passed_checks, report.failed_checks)
 ```
 
+Full oracle reference: [`src/bindings/dst/README.md`](src/bindings/dst/README.md).
+
 ## Common Patterns
 
 ### Health Check Loop
@@ -117,7 +113,7 @@ print(report.passed, report.passed_checks, report.failed_checks)
 while true do
     local result = dstest.step()
     if not result.more then break end
-    
+
     if result.fault ~= "pause" and result.fault ~= "kill" then
         local ok, resp = pcall(dstest.http, s, "GET", "/get")
         if ok and resp.status == 200 then
@@ -162,26 +158,18 @@ dstest.warn("something concerning")
 dstest.error("failure occurred")
 ```
 
-## Requirements
-
-- Docker daemon running
-- Rust 1.85+ (uses 2024 edition)
-
-## Examples in Repo
+## Examples
 
 | File | Demonstrates |
 |------|--------------|
-| `basic.lua` | Minimal HTTP checks |
-| `oracle.lua` | Predicate verification |
-| `response-time.lua` | Latency validation |
-| `multi-service.lua` | Multiple containers |
-| `fault-accumulation.lua` | Stacking faults |
-| `http-assertions.lua` | Status/body checks |
-| `parameter-sweep.lua` | Multiple seeds |
+| [`examples/httpbin.lua`](examples/httpbin.lua) | HTTP analysis: GET/POST, status/body assertions, latency |
+| [`examples/pg.lua`](examples/pg.lua) | PostgreSQL: connect, create table, insert, query, close |
+| [`examples/oracle.lua`](examples/oracle.lua) | Fault injection with oracle predicates and invariants |
 
 ## Writing Scripts
 
-Scripts are Lua and read from stdin. Use `pcall` for error handling since HTTP may fail during faults:
+Scripts are Lua and read from stdin. Use `pcall` for error handling since HTTP may
+fail during faults:
 
 ```lua
 local ok, resp = pcall(dstest.http, s, "GET", "/get")
@@ -190,9 +178,7 @@ if not ok then
 end
 ```
 
-## Debugging
+## Requirements
 
-1. Check Docker is running: `docker ps`
-2. View container logs: `docker logs <container-id>`
-3. Run with verbose logging: scripts use `dstest.debug()` for details
-4. Check examples directory for working patterns
+- Docker daemon running
+- Rust 1.85+ (uses 2024 edition)

@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use mlua::{Lua, Result, Table};
 
-use crate::bindings::context::BindingContext;
+use crate::engine::context::BindingContext;
+use crate::substrate::Substrate;
 
-pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
+pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let config = Arc::clone(&ctx.config);
     let state = Arc::clone(&ctx.state);
 

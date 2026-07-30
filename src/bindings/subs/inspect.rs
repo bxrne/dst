@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use mlua::{Lua, Result, Table};
 
-use crate::bindings::context::BindingContext;
-use crate::substrate::{ContainerState, Subject};
+use crate::engine::context::BindingContext;
+use crate::substrate::{ContainerState, Subject, Substrate};
 
-pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
+pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let substrate = Arc::clone(&ctx.substrate);
 
     let inspect_fn = lua.create_function(move |lua, id: String| {
