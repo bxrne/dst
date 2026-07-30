@@ -1,37 +1,33 @@
-mod clear;
 mod clock;
 mod context;
-mod exec;
-mod http;
-mod inspect;
+mod core;
+mod dst;
 mod log;
-mod logs;
-mod opts;
-mod oracle;
+mod net;
 mod pg;
-mod run_steps;
-mod setup;
-mod step;
-mod tcp;
+mod subs;
 
 pub use context::BindingContext;
 
 use mlua::{Lua, Table};
 
+pub trait LuaModule {
+    /// The namespace key used in Lua (e.g., "http", "pg", "clock")
+    fn namespace() -> &'static str;
+
+    /// Register functions, types, or state into the Lua environment
+    fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> mlua::Result<()>;
+}
+
 pub fn register_all(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> mlua::Result<()> {
-    log::register(lua, dstest, ctx)?;
-    opts::register(lua, dstest, ctx)?;
-    setup::register(lua, dstest, ctx)?;
-    http::register(lua, dstest, ctx)?;
-    oracle::register(lua, dstest, ctx)?;
-    step::register(lua, dstest, ctx)?;
-    run_steps::register(lua, dstest, ctx)?;
-    clear::register(lua, dstest, ctx)?;
-    logs::register(lua, dstest, ctx)?;
-    inspect::register(lua, dstest, ctx)?;
-    exec::register(lua, dstest, ctx)?;
-    pg::register(lua, dstest, ctx)?;
-    clock::register(lua, dstest, ctx)?;
-    tcp::register(lua, dstest, ctx)?;
+    // Modules
+    net::Net::register(lua, dstest, ctx)?;
+    dst::Dst::register(lua, dstest, ctx)?;
+    subs::Subs::register(lua, dstest, ctx)?;
+    log::Log::register(lua, dstest, ctx)?;
+    clock::Clock::register(lua, dstest, ctx)?;
+    core::Core::register(lua, dstest, ctx)?;
+    pg::Pg::register(lua, dstest, ctx)?;
+
     Ok(())
 }

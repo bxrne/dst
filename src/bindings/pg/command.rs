@@ -1,32 +1,9 @@
 use crate::bindings::context::BindingContext;
-use mlua::{FromLua, Lua, Result, Table, UserData, Value};
+use crate::bindings::pg::pool::LuaPgPool;
+use mlua::{Lua, Result, Table, Value};
 use sqlx::postgres::{PgPoolOptions, PgRow};
-use sqlx::{Column, PgPool, Row, TypeInfo};
+use sqlx::{Column, Row, TypeInfo};
 use tracing::info;
-
-#[derive(Clone)]
-struct LuaPgPool(PgPool);
-
-impl UserData for LuaPgPool {
-    fn add_methods<M: mlua::UserDataMethods<Self>>(_methods: &mut M) {}
-}
-
-impl FromLua for LuaPgPool {
-    fn from_lua(value: Value, _lua: &Lua) -> Result<Self> {
-        let userdata = match value {
-            Value::UserData(ud) => ud,
-            _ => {
-                return Err(mlua::Error::FromLuaConversionError {
-                    from: value.type_name(),
-                    to: "LuaPgPool".to_string(),
-                    message: Some("Expected UserData".to_string()),
-                });
-            }
-        };
-        let pool = userdata.borrow::<Self>()?.clone();
-        Ok(pool)
-    }
-}
 
 fn pg_cell_to_lua_value(lua: &Lua, row: &PgRow, index: usize) -> Result<Value> {
     let column = row.column(index);
