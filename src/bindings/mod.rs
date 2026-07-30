@@ -8,6 +8,7 @@ mod log;
 mod logs;
 mod opts;
 mod oracle;
+mod pg;
 mod run_steps;
 mod setup;
 mod step;
@@ -29,6 +30,7 @@ pub fn register_all(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> mlua::Re
     logs::register(lua, dstest, ctx)?;
     inspect::register(lua, dstest, ctx)?;
     exec::register(lua, dstest, ctx)?;
+    pg::register(lua, dstest, ctx)?;
     clock::register(lua, dstest, ctx)?;
     tcp::register(lua, dstest, ctx)?;
     Ok(())

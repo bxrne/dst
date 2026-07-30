@@ -1,6 +1,5 @@
-use tracing::{debug, warn};
-
 use crate::bindings::{BindingContext, register_all};
+use tracing::{debug, warn};
 
 pub struct Engine {
     ctx: BindingContext,
@@ -33,8 +32,9 @@ impl Engine {
         Engine { ctx }
     }
 
-    pub fn execute(&self, script: &str) -> mlua::Result<()> {
-        self.ctx.lua.load(script).exec()
+    // Changed: Made async and switched from .exec() to .call_async()
+    pub async fn execute(&self, script: &str) -> mlua::Result<()> {
+        self.ctx.lua.load(script).call_async::<()>(()).await
     }
 }
 

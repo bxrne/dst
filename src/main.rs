@@ -1,6 +1,5 @@
 use std::io::{Read, stdin};
 use tracing::{debug, error};
-
 mod bindings;
 mod config;
 mod engine;
@@ -8,7 +7,8 @@ mod fault;
 mod oracle;
 mod substrate;
 
-fn main() {
+#[tokio::main] // Added: Initializes the ambient Tokio reactor pool
+async fn main() {
     tracing_subscriber::fmt::init();
 
     debug!("Starting dstest");
@@ -22,7 +22,8 @@ fn main() {
         std::process::exit(1);
     }
 
-    match engine.execute(&script) {
+    // Added .await since engine.execute is now an async call
+    match engine.execute(&script).await {
         Ok(_) => debug!("Experiment complete"),
         Err(e) => error!("Failed to execute script error=\"{e}\""),
     }
