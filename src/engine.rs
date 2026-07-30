@@ -1,7 +1,6 @@
 use tracing::{debug, warn};
 
 use crate::bindings::{BindingContext, register_all};
-use crate::substrate::Substrate;
 
 pub struct Engine {
     ctx: BindingContext,
@@ -54,7 +53,7 @@ impl Drop for Engine {
 
         for (id, _) in subjects {
             let subject = crate::substrate::Subject::new(id.clone());
-            if let Err(e) = self.ctx.docker.teardown(subject) {
+            if let Err(e) = self.ctx.substrate.teardown(subject) {
                 warn!("RAII teardown failed for subject {}: {}", id, e);
             } else {
                 debug!("teardown complete for subject {}", id);

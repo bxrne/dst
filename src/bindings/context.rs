@@ -5,7 +5,8 @@ use mlua::Lua;
 use crate::config::Config;
 use crate::fault::FaultTree;
 use crate::oracle::OracleRef;
-use crate::substrate::docker::{Docker, DockerSubjectData};
+use crate::substrate::docker::DockerSubjectData;
+use crate::substrate::{Substrate, docker::Docker};
 
 #[derive(Default)]
 pub struct EngineState {
@@ -19,19 +20,22 @@ pub struct BindingContext {
     pub config: Arc<Mutex<Config>>,
     pub fault_tree: Arc<Mutex<Option<FaultTree>>>,
     pub oracle: OracleRef,
+    pub substrate: Arc<dyn Substrate>,
     pub docker: Arc<Docker>,
     pub lua: Lua,
 }
 
 impl BindingContext {
     pub fn new() -> Self {
-        let docker = Docker::new().expect("failed to connect to Docker daemon");
+        let docker = Arc::new(Docker::new().expect("failed to connect to Docker daemon"));
+        let substrate = Arc::clone(&docker) as Arc<dyn Substrate>;
         Self {
             state: Arc::new(Mutex::new(EngineState::default())),
             config: Arc::new(Mutex::new(Config::default())),
             fault_tree: Arc::new(Mutex::new(None)),
             oracle: Arc::new(Mutex::new(crate::oracle::Oracle::new())),
-            docker: Arc::new(docker),
+            substrate,
+            docker,
             lua: Lua::new(),
         }
     }

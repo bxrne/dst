@@ -55,6 +55,103 @@ local subject = dstest.setup({
 | `cmd` | table | No | Array of command arguments to override container entrypoint |
 
 #### `dstest.http(subject, method, path)`
+Makes an HTTP request to the subject. Returns a table with `status` (number) and `body` (string).
+
+```lua
+local resp = dstest.http(subject, "GET", "/get")
+if resp.status == 200 then
+    dstest.info("request successful")
+end
+```
+
+#### `dstest.logs(subject, options?)`
+Fetches container logs. Returns an array of log entries.
+
+```lua
+local logs = dstest.logs(subject, { tail = "50", timestamps = true })
+for _, entry in ipairs(logs) do
+    if entry.stream == "stderr" then
+        dstest.warn(entry.message)
+    end
+end
+```
+
+**Options:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stdout` | boolean | `true` | Include stdout stream |
+| `stderr` | boolean | `true` | Include stderr stream |
+| `tail` | string | `"all"` | Number of lines (`"50"`, `"all"`) |
+| `since` | number | - | UNIX timestamp (seconds) |
+| `timestamps` | boolean | `false` | Include timestamps |
+
+#### `dstest.inspect(subject)`
+Returns container metadata and state.
+
+```lua
+local info = dstest.inspect(subject)
+print(info.state, info.pid, info.ip)
+assert(info.state == "running", "container should be running")
+```
+
+Return fields:
+- `state` (string): `"running"`, `"paused"`, `"exited"`, or `"dead"`
+- `pid` (number, optional): Process ID
+- `ip` (string, optional): Container IP address
+- `memory_limit` (number, optional): Memory limit in bytes
+- `cpu_quota` (number, optional): CPU quota (0.0-1.0)
+
+#### `dstest.exec(subject, command)`
+Runs a command inside the container and returns the result.
+
+```lua
+local result = dstest.exec(subject, {"ls", "-la", "/app"})
+if result.exit_code == 0 then
+    dstest.info("files:\n" .. result.stdout)
+else
+    dstest.error("exec failed: " .. result.stderr)
+end
+```
+
+Return fields:
+- `exit_code` (number): Command exit code (-1 if unknown)
+- `stdout` (string): Standard output
+- `stderr` (string): Standard error
+
+#### `dstest.clock()`
+Returns high-precision timestamp. Useful for measuring latency.
+
+```lua
+local start = dstest.clock()
+-- ... do work ...
+local elapsed_nanos = dstest.clock().nanos - start.nanos
+print(string.format("elapsed: %.2fms", elapsed_nanos / 1e6))
+```
+
+Return fields:
+- `nanos` (number): Nanoseconds since UNIX epoch
+- `micros` (number): Microseconds since UNIX epoch
+- `millis` (number): Milliseconds since UNIX epoch
+- `secs` (number): Seconds since UNIX epoch
+
+#### `dstest.tcp(subject, port)`
+Tests TCP connectivity to a port on the subject.
+
+```lua
+-- Test database connectivity
+local conn = dstest.tcp(subject, 5432)
+if conn.connected then
+    dstest.info("PostgreSQL reachable at " .. conn.addr)
+else
+    dstest.warn("PostgreSQL unreachable: " .. conn.error)
+end
+```
+
+Return fields:
+- `connected` (boolean): Whether connection succeeded
+- `addr` (string): Address tested (`host:port`)
+- `error` (string, optional): Error message if connection failed
 
 ### Fault Injection
 
@@ -232,3 +329,8 @@ local results2 = dstest.run_steps(10)
 - `fault-accumulation.lua` - Stacking faults without clearing
 - `http-assertions.lua` - Custom HTTP status/body assertions
 - `parameter-sweep.lua` - Running experiments with different seeds
+- `logs.lua` - Fetching and analyzing container logs
+- `inspect.lua` - Container state verification after faults
+- `exec.lua` - Running commands inside containers
+- `timing.lua` - High-precision latency measurements
+- `tcp.lua` - Testing non-HTTP service connectivity

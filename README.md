@@ -33,13 +33,18 @@ dstest lets you write Lua scripts that define test subjects (Docker containers),
 
 ## Examples
 
-- `basic.lua` - Minimal setup with HTTP checks
+- `basic.lua` - Minimal HTTP checks
 - `oracle.lua` - Oracle predicates for automated verification
 - `response-time.lua` - Response time validation
 - `multi-service.lua` - Fault injection across multiple containers
 - `fault-accumulation.lua` - Stacking faults without clearing
 - `http-assertions.lua` - Custom HTTP status/body assertions
 - `parameter-sweep.lua` - Running experiments with different seeds
+- `logs.lua` - Fetching and analyzing container logs
+- `inspect.lua` - Container state verification after faults
+- `exec.lua` - Running commands inside containers
+- `timing.lua` - High-precision latency measurements
+- `tcp.lua` - Testing non-HTTP service connectivity
 
 ## Documentation
 

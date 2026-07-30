@@ -34,7 +34,7 @@ pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
         };
 
         let cfg = config.lock().expect("poisoned config lock");
-        let substrate = substrate_type
+        let substrate_name = substrate_type
             .or_else(|| cfg.substrate.clone())
             .ok_or_else(|| {
                 mlua::Error::RuntimeError(
@@ -43,7 +43,7 @@ pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
                 )
             })?;
 
-        match substrate.as_str() {
+        match substrate_name.as_str() {
             "docker" => {
                 let image: String = config_tbl.get("image")?;
                 let ports: Option<Vec<u16>> = config_tbl.get("ports").ok();
@@ -79,7 +79,7 @@ pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
             }
             _ => Err(mlua::Error::RuntimeError(format!(
                 "unknown substrate type: {}",
-                substrate
+                substrate_name
             ))),
         }
     })?;

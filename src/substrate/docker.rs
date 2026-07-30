@@ -3,19 +3,25 @@ use std::fs;
 use std::sync::OnceLock;
 
 use bollard::Docker as BollardDocker;
+use bollard::container::LogOutput;
 use bollard::errors::Error as BollardError;
+use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{
     ContainerCreateBody, ContainerStateStatusEnum, ContainerUpdateBody, HostConfig,
     NetworkConnectRequest, NetworkDisconnectRequest, PortBinding, ThrottleDevice,
 };
 use bollard::query_parameters::CreateImageOptions;
 use bollard::query_parameters::{
-    CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
+    CreateContainerOptions, InspectContainerOptions, LogsOptionsBuilder, RemoveContainerOptions,
+    StartContainerOptions,
 };
 use futures_util::TryStreamExt;
 use tracing::{debug, info, warn};
 
-use crate::substrate::{Fault, Subject, Substrate};
+use crate::substrate::{
+    ContainerState, ExecResult, Fault, InspectResult, LogEntry, LogOptions, Stream, Subject,
+    Substrate,
+};
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -177,6 +183,152 @@ impl Substrate for Docker {
             .map_err(|e| format!("Failed to remove container: {}", e))?;
 
         Ok(())
+    }
+
+    fn logs(&self, subject: &Subject, opts: LogOptions) -> Result<Vec<LogEntry>, String> {
+        let rt = runtime();
+        let id = Self::container_id(subject);
+
+        let mut builder = LogsOptionsBuilder::new()
+            .stdout(opts.stdout)
+            .stderr(opts.stderr)
+            .timestamps(opts.timestamps);
+
+        if let Some(tail) = opts.tail {
+            builder = builder.tail(&tail);
+        }
+        if let Some(since) = opts.since {
+            builder = builder.since(since);
+        }
+
+        let options = builder.build();
+
+        let stream = rt
+            .block_on(
+                self.connection
+                    .logs(id, Some(options))
+                    .try_collect::<Vec<_>>(),
+            )
+            .map_err(|e| format!("Failed to get logs: {}", e))?;
+
+        stream
+            .into_iter()
+            .filter_map(|entry| match entry {
+                LogOutput::StdOut { message } => Some(LogEntry {
+                    stream: Stream::StdOut,
+                    message: String::from_utf8_lossy(&message).to_string(),
+                }),
+                LogOutput::StdErr { message } => Some(LogEntry {
+                    stream: Stream::StdErr,
+                    message: String::from_utf8_lossy(&message).to_string(),
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(Ok)
+            .collect()
+    }
+
+    fn inspect(&self, subject: &Subject) -> Result<InspectResult, String> {
+        let rt = runtime();
+        let id = Self::container_id(subject);
+
+        let info = rt
+            .block_on(
+                self.connection
+                    .inspect_container(id, None::<InspectContainerOptions>),
+            )
+            .map_err(|e| format!("Inspect failed: {}", e))?;
+
+        let state = match info.state.as_ref().and_then(|s| s.status) {
+            Some(ContainerStateStatusEnum::RUNNING) => ContainerState::Running,
+            Some(ContainerStateStatusEnum::PAUSED) => ContainerState::Paused,
+            Some(ContainerStateStatusEnum::EXITED) => ContainerState::Exited,
+            Some(ContainerStateStatusEnum::DEAD) => ContainerState::Dead,
+            _ => ContainerState::Dead,
+        };
+
+        Ok(InspectResult {
+            state,
+            pid: info.state.as_ref().and_then(|s| s.pid.map(|p| p as u32)),
+            ip: info
+                .network_settings
+                .and_then(|n| n.networks)
+                .and_then(|networks| {
+                    networks
+                        .values()
+                        .next()
+                        .and_then(|endpoint| endpoint.ip_address.clone())
+                }),
+            memory_limit: info
+                .host_config
+                .as_ref()
+                .and_then(|h| h.memory.map(|m| m as u64)),
+            cpu_quota: info.host_config.as_ref().and_then(|h| {
+                h.cpu_quota
+                    .zip(h.cpu_period)
+                    .map(|(q, p)| q as f64 / p as f64)
+            }),
+        })
+    }
+
+    fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String> {
+        let rt = runtime();
+        let id = Self::container_id(subject);
+
+        let config = CreateExecOptions {
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            cmd: Some(cmd.iter().map(|s| s.as_str()).collect()),
+            ..Default::default()
+        };
+
+        let exec = rt
+            .block_on(self.connection.create_exec(id, config))
+            .map_err(|e| format!("Create exec failed: {}", e))?;
+
+        let result = rt
+            .block_on(
+                self.connection
+                    .start_exec(&exec.id, Some(StartExecOptions::default())),
+            )
+            .map_err(|e| format!("Start exec failed: {}", e))?;
+
+        let (stdout, stderr) = match result {
+            StartExecResults::Attached { output, .. } => {
+                let entries = rt
+                    .block_on(output.try_collect::<Vec<_>>())
+                    .map_err(|e| format!("Exec output failed: {}", e))?;
+
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+
+                for entry in entries {
+                    match entry {
+                        LogOutput::StdOut { message } => {
+                            stdout.push_str(&String::from_utf8_lossy(&message));
+                        }
+                        LogOutput::StdErr { message } => {
+                            stderr.push_str(&String::from_utf8_lossy(&message));
+                        }
+                        _ => {}
+                    }
+                }
+                (stdout, stderr)
+            }
+            StartExecResults::Detached => (String::new(), String::new()),
+        };
+
+        let inspect = rt
+            .block_on(self.connection.inspect_exec(&exec.id))
+            .map_err(|e| format!("Inspect exec failed: {}", e))?;
+
+        Ok(ExecResult {
+            exit_code: inspect.exit_code.unwrap_or(-1) as i32,
+            stdout,
+            stderr,
+        })
     }
 }
 

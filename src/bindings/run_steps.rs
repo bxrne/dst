@@ -5,13 +5,12 @@ use mlua::{Lua, Result, Table};
 use crate::bindings::context::BindingContext;
 use crate::config::AccumulationMode;
 use crate::fault::FaultTree;
-use crate::substrate::Substrate;
 
 pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
     let state = Arc::clone(&ctx.state);
     let config = Arc::clone(&ctx.config);
     let fault_tree = Arc::clone(&ctx.fault_tree);
-    let docker = Arc::clone(&ctx.docker);
+    let substrate = Arc::clone(&ctx.substrate);
     let oracle = Arc::clone(&ctx.oracle);
 
     let run_steps_fn = lua.create_function(move |lua, n: usize| {
@@ -64,7 +63,7 @@ pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
 
             match accumulation_mode {
                 AccumulationMode::Single => {
-                    docker
+                    substrate
                         .clear_faults(&subject)
                         .map_err(mlua::Error::RuntimeError)?;
                     std::thread::sleep(std::time::Duration::from_millis(step_delay));
@@ -72,7 +71,7 @@ pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
                 AccumulationMode::Accumulate => {}
             }
 
-            docker
+            substrate
                 .affect(&subject, &step_result.fault)
                 .map_err(mlua::Error::RuntimeError)?;
 
