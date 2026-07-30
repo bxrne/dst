@@ -1,7 +1,7 @@
 # subs
 
 Subject introspection — container state, logs, and command execution. Exposes
-`dstest.inspect`, `dstest.logs`, `dstest.exec`.
+`dstest.inspect`, `dstest.logs`, `dstest.exec` (flat on the `dstest` table).
 
 ## `dstest.inspect(subject)`
 

@@ -23,11 +23,11 @@ local s = dstest.setup({
 })
 
 -- Predicate: /get must stay healthy during non-fatal faults
-dstest.oracle.predicate("get_healthy", function(subject, fault, round)
+dstest.dst.oracle.predicate("get_healthy", function(subject, fault, round)
     if fault == "pause" or fault == "kill" then
         return true
     end
-    local ok, resp = pcall(dstest.http, subject, "GET", "/get")
+    local ok, resp = pcall(dstest.net.http, subject, "GET", "/get")
     if not ok then
         return { false, "request failed: " .. tostring(resp) }
     end
@@ -38,9 +38,9 @@ dstest.oracle.predicate("get_healthy", function(subject, fault, round)
 end)
 
 -- Invariant: response time must stay under 500ms
-dstest.oracle.invariant("response_time_under_500ms", function()
+dstest.dst.oracle.invariant("response_time_under_500ms", function()
     local start = dstest.clock()
-    local ok, resp = pcall(dstest.http, s, "GET", "/get")
+    local ok, resp = pcall(dstest.net.http, s, "GET", "/get")
     local elapsed = (dstest.clock().nanos - start.nanos) / 1e6
     if not ok then
         return { false, "request failed" }
@@ -53,8 +53,8 @@ end)
 
 dstest.info("running oracle experiment")
 
-local report = dstest.oracle.run(function()
-    local results = dstest.run_steps(8)
+local report = dstest.dst.oracle.run(function()
+    local results = dstest.dst.run_steps(8)
     for _, r in ipairs(results) do
         dstest.info(string.format("round %d: %s on %s", r.round, r.fault, r.subject))
     end
@@ -79,5 +79,5 @@ end
 local info = dstest.inspect(s)
 dstest.info(string.format("final state: %s", info.state))
 
-dstest.clear(s)
+dstest.dst.clear(s)
 dstest.info("oracle example complete")

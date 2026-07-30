@@ -13,8 +13,8 @@ pub trait LuaModule<S: Substrate> {
 ```
 
 `register_all` (in `mod.rs`) wires every module into the `dstest` table at engine
-startup. Each module creates its own sub-table (e.g. `dstest.oracle`) and populates
-it with functions, or registers functions directly on `dstest` for flat namespaces.
+startup. Each module either registers functions directly on `dstest` (flat) or
+creates a sub-table (namespaced).
 
 `BindingContext<S>` (defined in [`src/engine/context.rs`](../engine/context.rs)) is the
 shared handle every binding clones `Arc`s from: engine state, config, fault tree, oracle,
@@ -22,15 +22,15 @@ and the substrate.
 
 ## Namespaces
 
-| Namespace | Folder | Lua functions |
-|-----------|--------|---------------|
-| `dstest.config`, `dstest.setup` | [`core/`](core/README.md) | `config`, `setup` |
-| `dstest.step`, `dstest.run_steps`, `dstest.clear`, `dstest.oracle.*` | [`dst/`](dst/README.md) | `step`, `run_steps`, `clear`, `oracle` |
-| `dstest.http`, `dstest.tcp` | [`net/`](net/README.md) | `http`, `tcp` |
-| `dstest.inspect`, `dstest.logs`, `dstest.exec` | [`subs/`](subs/README.md) | `inspect`, `logs`, `exec` |
-| `dstest.pg.*` | [`pg/`](pg/README.md) | `pg.connect`, `pg.query`, `pg.close` |
-| `dstest.clock` | [`clock.rs`](clock.rs) | `clock` |
-| `dstest.debug/info/warn/error` | [`log.rs`](log.rs) | `debug`, `info`, `warn`, `error` |
+| Namespace | Folder | Lua functions | Style |
+|-----------|--------|---------------|-------|
+| `dstest.config`, `dstest.setup` | [`core/`](core/README.md) | `config`, `setup` | flat |
+| `dstest.dst.step`, `dstest.dst.run_steps`, `dstest.dst.clear`, `dstest.dst.oracle.*` | [`dst/`](dst/README.md) | `step`, `run_steps`, `clear`, `oracle` | namespaced |
+| `dstest.net.http`, `dstest.net.tcp` | [`net/`](net/README.md) | `http`, `tcp` | namespaced |
+| `dstest.inspect`, `dstest.logs`, `dstest.exec` | [`subs/`](subs/README.md) | `inspect`, `logs`, `exec` | flat |
+| `dstest.pg.connect`, `dstest.pg.query`, `dstest.pg.close` | [`pg/`](pg/README.md) | `pg.connect`, `pg.query`, `pg.close` | namespaced |
+| `dstest.clock` | [`clock.rs`](clock.rs) | `clock` | flat |
+| `dstest.debug/info/warn/error` | [`log.rs`](log.rs) | `debug`, `info`, `warn`, `error` | flat |
 
 ## Adding a new binding module
 

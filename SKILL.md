@@ -79,26 +79,34 @@ local s = dstest.setup({
     cmd = { "python", "-m", "httpbin" },
 })
 
-local result = dstest.step()        -- Single fault
-local results = dstest.run_steps(5) -- Multiple faults
-dstest.clear(s)                     -- Clear active faults
-local resp = dstest.http(s, "GET", "/get")
+-- Fault injection (namespaced under dstest.dst)
+local result = dstest.dst.step()        -- Single fault
+local results = dstest.dst.run_steps(5) -- Multiple faults
+dstest.dst.clear(s)                     -- Clear active faults
+
+-- HTTP and TCP (namespaced under dstest.net)
+local resp = dstest.net.http(s, "GET", "/get")
+
+-- Container introspection (flat on dstest)
+local info = dstest.inspect(s)
+local logs = dstest.logs(s, { tail = "50" })
+local exec_result = dstest.exec(s, {"ls", "-la", "/app"})
 ```
 
-For the full API reference (oracle, tcp, pg, inspect, logs, exec, clock, logging),
-see the per-module READMEs linked from [`src/bindings/README.md`](src/bindings/README.md).
+For the full API reference, see the per-module READMEs linked from
+[`src/bindings/README.md`](src/bindings/README.md).
 
 ## Oracle (Automated Verification)
 
 ```lua
-dstest.oracle.predicate("health_check", function(subject, fault, round)
+dstest.dst.oracle.predicate("health_check", function(subject, fault, round)
     if fault == "pause" or fault == "kill" then return true end
-    local ok, resp = pcall(dstest.http, subject, "GET", "/health")
+    local ok, resp = pcall(dstest.net.http, subject, "GET", "/health")
     return ok and resp.status == 200
 end)
 
-local report = dstest.oracle.run(function()
-    dstest.run_steps(10)
+local report = dstest.dst.oracle.run(function()
+    dstest.dst.run_steps(10)
 end)
 
 print(report.passed, report.passed_checks, report.failed_checks)
@@ -111,11 +119,11 @@ Full oracle reference: [`src/bindings/dst/README.md`](src/bindings/dst/README.md
 ### Health Check Loop
 ```lua
 while true do
-    local result = dstest.step()
+    local result = dstest.dst.step()
     if not result.more then break end
 
     if result.fault ~= "pause" and result.fault ~= "kill" then
-        local ok, resp = pcall(dstest.http, s, "GET", "/get")
+        local ok, resp = pcall(dstest.net.http, s, "GET", "/get")
         if ok and resp.status == 200 then
             dstest.info("healthy")
         else
@@ -130,9 +138,9 @@ end
 local backend = dstest.setup({ image = "myapp/backend", ports = { 8080 } })
 local cache = dstest.setup({ image = "redis", ports = { 6379 } })
 
-dstest.run_steps(10)
-dstest.clear(backend)
-dstest.clear(cache)
+dstest.dst.run_steps(10)
+dstest.dst.clear(backend)
+dstest.dst.clear(cache)
 ```
 
 ## Determinism
@@ -141,10 +149,10 @@ Same seed = identical fault sequence:
 
 ```lua
 dstest.config({ seed = 42 })
-local r1 = dstest.run_steps(5)
+local r1 = dstest.dst.run_steps(5)
 
 dstest.config({ seed = 42 })
-local r2 = dstest.run_steps(5)
+local r2 = dstest.dst.run_steps(5)
 
 -- r1 and r2 have identical faults in identical order
 ```
@@ -172,7 +180,7 @@ Scripts are Lua and read from stdin. Use `pcall` for error handling since HTTP m
 fail during faults:
 
 ```lua
-local ok, resp = pcall(dstest.http, s, "GET", "/get")
+local ok, resp = pcall(dstest.net.http, s, "GET", "/get")
 if not ok then
     dstest.warn("request failed: " .. tostring(resp))
 end

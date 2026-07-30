@@ -13,10 +13,12 @@ pub struct Dst;
 
 impl<S: Substrate> LuaModule<S> for Dst {
     fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> mlua::Result<()> {
-        clear::register(lua, dstest, ctx)?;
-        oracle::register(lua, dstest, ctx)?;
-        step::register(lua, dstest, ctx)?;
-        run_steps::register(lua, dstest, ctx)?;
+        let dst_table = lua.create_table()?;
+        clear::register(lua, &dst_table, ctx)?;
+        oracle::register(lua, &dst_table, ctx)?;
+        step::register(lua, &dst_table, ctx)?;
+        run_steps::register(lua, &dst_table, ctx)?;
+        dstest.set("dst", dst_table)?;
         Ok(())
     }
 }

@@ -1,15 +1,15 @@
 # dst
 
-Fault injection and the oracle verification system. Exposes `dstest.step`,
-`dstest.run_steps`, `dstest.clear`, and `dstest.oracle.*`.
+Fault injection and the oracle verification system. Exposes `dstest.dst.step`,
+`dstest.dst.run_steps`, `dstest.dst.clear`, and `dstest.dst.oracle.*`.
 
-## `dstest.step()`
+## `dstest.dst.step()`
 
 Applies the next fault in the deterministic sequence. Returns a table describing
 what happened, or `{ more = false }` when the sequence is exhausted.
 
 ```lua
-local result = dstest.step()
+local result = dstest.dst.step()
 -- result = { fault = "pause", subject = "docker/abc123", round = 1,
 --            total_rounds = 10, remaining = 9, more = true }
 ```
@@ -30,24 +30,24 @@ wait) before applying the next. In `accumulate` mode, faults stack.
 When the oracle is enabled, `step` runs all predicates after applying the fault
 and attaches an `oracle` sub-table: `{ passed, total_checks, passed_checks, failed_checks }`.
 
-## `dstest.run_steps(n)`
+## `dstest.dst.run_steps(n)`
 
 Runs `n` steps and returns an array of result tables (same shape as `step`).
 Stops early if the sequence is exhausted.
 
 ```lua
-local results = dstest.run_steps(5)
+local results = dstest.dst.run_steps(5)
 for _, r in ipairs(results) do
     dstest.info("round " .. r.round .. ": " .. r.fault)
 end
 ```
 
-## `dstest.clear(subject)`
+## `dstest.dst.clear(subject)`
 
 Clears all active faults on a subject.
 
 ```lua
-dstest.clear(subject)
+dstest.dst.clear(subject)
 ```
 
 ## Oracle
@@ -55,15 +55,15 @@ dstest.clear(subject)
 Automated verification of system properties during fault injection. Predicates are
 checked after each `step`/`run_steps` round; invariants are checked continuously.
 
-### `dstest.oracle.predicate(name, fn)`
+### `dstest.dst.oracle.predicate(name, fn)`
 
 Registers a health predicate checked after each fault. The function receives
 `(subject, fault, round)` and returns `true` or `{ passed, message? }`.
 
 ```lua
-dstest.oracle.predicate("http_health", function(subject, fault, round)
+dstest.dst.oracle.predicate("http_health", function(subject, fault, round)
     if fault == "pause" or fault == "kill" then return true end
-    local ok, resp = pcall(dstest.http, subject, "GET", "/health")
+    local ok, resp = pcall(dstest.net.http, subject, "GET", "/health")
     if not ok or resp.status ~= 200 then
         return { false, "health check failed" }
     end
@@ -71,19 +71,19 @@ dstest.oracle.predicate("http_health", function(subject, fault, round)
 end)
 ```
 
-### `dstest.oracle.invariant(name, fn)`
+### `dstest.dst.oracle.invariant(name, fn)`
 
 Registers an invariant checked throughout the experiment. Returns `true` or
 `{ passed, message? }`.
 
-### `dstest.oracle.run(fn)`
+### `dstest.dst.oracle.run(fn)`
 
 Runs a function with the oracle enabled, returns a report. Automatically enables
 checking during `step()`/`run_steps()` and disables it after.
 
 ```lua
-local report = dstest.oracle.run(function()
-    dstest.run_steps(10)
+local report = dstest.dst.oracle.run(function()
+    dstest.dst.run_steps(10)
 end)
 
 if not report.passed then
@@ -94,12 +94,12 @@ if not report.passed then
 end
 ```
 
-### `dstest.oracle.enable()` / `disable()` / `reset()`
+### `dstest.dst.oracle.enable()` / `disable()` / `reset()`
 
 Manual control of oracle checking state. `enable` resets the report. `reset`
 clears recorded results without changing the enabled flag.
 
-### `dstest.oracle.report()`
+### `dstest.dst.oracle.report()`
 
 Returns the current report without modifying state.
 

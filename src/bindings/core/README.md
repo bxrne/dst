@@ -1,10 +1,11 @@
 # core
 
-Experiment configuration and subject setup. Exposes `dstest.config` and `dstest.setup`.
+Experiment configuration and subject setup. Exposes `dstest.config` and `dstest.setup`
+(flat on the `dstest` table).
 
 ## `dstest.config(options)`
 
-Configures the experiment. Must be called before `dstest.setup()` and `dstest.step()`.
+Configures the experiment. Must be called before `dstest.setup()` and `dstest.dst.step()`.
 The `substrate` and `seed` fields are required.
 
 ```lua

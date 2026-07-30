@@ -18,15 +18,15 @@ Logging output is printed to stderr as the script runs.
 
 ## Lua API
 
-The global `dstest` table is the entry point. Function reference lives in the
-per-module READMEs under [`src/bindings/`](src/bindings/README.md):
+The global `dstest` table is the entry point. Some functions are flat on `dstest`,
+others are namespaced under sub-tables.
 
 | Namespace | Functions | Reference |
 |-----------|-----------|-----------|
 | `dstest.config`, `dstest.setup` | experiment config, create subjects | [`src/bindings/core/README.md`](src/bindings/core/README.md) |
-| `dstest.step`, `dstest.run_steps`, `dstest.clear` | fault injection | [`src/bindings/dst/README.md`](src/bindings/dst/README.md) |
-| `dstest.oracle.*` | predicates, invariants, reports | [`src/bindings/dst/README.md`](src/bindings/dst/README.md) |
-| `dstest.http`, `dstest.tcp` | HTTP requests, raw TCP | [`src/bindings/net/README.md`](src/bindings/net/README.md) |
+| `dstest.dst.step`, `dstest.dst.run_steps`, `dstest.dst.clear` | fault injection | [`src/bindings/dst/README.md`](src/bindings/dst/README.md) |
+| `dstest.dst.oracle.*` | predicates, invariants, reports | [`src/bindings/dst/README.md`](src/bindings/dst/README.md) |
+| `dstest.net.http`, `dstest.net.tcp` | HTTP requests, raw TCP | [`src/bindings/net/README.md`](src/bindings/net/README.md) |
 | `dstest.inspect`, `dstest.logs`, `dstest.exec` | container introspection | [`src/bindings/subs/README.md`](src/bindings/subs/README.md) |
 | `dstest.pg.connect`, `dstest.pg.query`, `dstest.pg.close` | PostgreSQL | [`src/bindings/pg/README.md`](src/bindings/pg/README.md) |
 | `dstest.clock` | high-precision timestamps | [`src/bindings/clock.rs`](src/bindings/clock.rs) |
@@ -66,11 +66,11 @@ Same seed produces identical fault sequences:
 ```lua
 dstest.config({ substrate = "docker", seed = 42 })
 local s = dstest.setup({ image = "kennethreitz/httpbin", ports = { 80 } })
-local results1 = dstest.run_steps(10)
+local results1 = dstest.dst.run_steps(10)
 
 dstest.config({ substrate = "docker", seed = 42 })
 local s = dstest.setup({ image = "kennethreitz/httpbin", ports = { 80 } })
-local results2 = dstest.run_steps(10)
+local results2 = dstest.dst.run_steps(10)
 
 -- results1 and results2 have identical fault sequences
 ```
