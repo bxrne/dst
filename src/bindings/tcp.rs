@@ -1,4 +1,4 @@
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,12 +28,13 @@ pub fn register(lua: &Lua, dstest: &Table, ctx: &BindingContext) -> Result<()> {
             cfg.http_timeout_secs
         };
 
-        match TcpStream::connect_timeout(
-            &addr
-                .parse()
-                .map_err(|e| mlua::Error::RuntimeError(format!("invalid address: {}", e)))?,
-            Duration::from_secs(timeout_secs),
-        ) {
+        let socket_addr = addr
+            .to_socket_addrs()
+            .map_err(|e| mlua::Error::RuntimeError(format!("invalid address: {}", e)))?
+            .next()
+            .ok_or_else(|| mlua::Error::RuntimeError("address resolved to nothing".to_string()))?;
+
+        match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(timeout_secs)) {
             Ok(_stream) => {
                 let t = lua.create_table()?;
                 t.set("connected", true)?;
