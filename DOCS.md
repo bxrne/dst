@@ -136,22 +136,46 @@ Return fields:
 - `secs` (number): Seconds since UNIX epoch
 
 #### `dstest.tcp(subject, port)`
-Tests TCP connectivity to a port on the subject.
+Opens a TCP connection to a port on the subject. Returns a connection object on success, or `nil` and an error string on failure.
 
 ```lua
--- Test database connectivity
-local conn = dstest.tcp(subject, 5432)
-if conn.connected then
-    dstest.info("PostgreSQL reachable at " .. conn.addr)
-else
-    dstest.warn("PostgreSQL unreachable: " .. conn.error)
+local conn, err = dstest.tcp(subject, 5432)
+if not conn then
+    dstest.warn("connect failed: " .. tostring(err))
+    return
 end
+conn:send("PING\r\n")
+local line = conn:recv_line()
+dstest.info("got: " .. line)
+conn:close()
 ```
 
-Return fields:
-- `connected` (boolean): Whether connection succeeded
-- `addr` (string): Address tested (`host:port`)
-- `error` (string, optional): Error message if connection failed
+**Connection methods:**
+
+| Method | Description |
+|--------|-------------|
+| `conn:send(data)` | Send a string over the connection |
+| `conn:recv(n)` | Read up to `n` bytes (returns `nil` on EOF) |
+| `conn:recv_line()` | Read until `\n` (returns `nil` on EOF) |
+| `conn:recv_until(delim)` | Read until a delimiter string (returns `nil` on EOF) |
+| `conn:close()` | Close the connection (both directions) |
+| `conn:addr()` | Return the remote address string |
+| `conn:set_timeout(secs)` | Set read/write timeout in seconds |
+| `conn:set_nodelay(bool)` | Enable/disable TCP_NODELAY |
+
+**Example: line-oriented protocol**
+
+```lua
+local conn = dstest.tcp(s, 6379)
+conn:send("PING\r\n")
+local resp = conn:recv_line()  -- "+PONG\r\n"
+conn:send("SET foo bar\r\n")
+local ok = conn:recv_line()   -- "+OK\r\n"
+conn:send("GET foo\r\n")
+local val = conn:recv_line()   -- "$3\r\n"
+local data = conn:recv_line()  -- "bar\r\n"
+conn:close()
+```
 
 ### Fault Injection
 
@@ -333,4 +357,4 @@ local results2 = dstest.run_steps(10)
 - `inspect.lua` - Container state verification after faults
 - `exec.lua` - Running commands inside containers
 - `timing.lua` - High-precision latency measurements
-- `tcp.lua` - Testing non-HTTP service connectivity
+- `tcp.lua` - TCP send/recv and line-oriented protocols

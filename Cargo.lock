@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "dstest"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "bollard",
