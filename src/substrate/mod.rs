@@ -40,34 +40,6 @@ pub struct LogEntry {
     pub message: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ContainerState {
-    Running,
-    Paused,
-    Exited,
-    Dead,
-}
-
-impl Display for ContainerState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ContainerState::Running => write!(f, "running"),
-            ContainerState::Paused => write!(f, "paused"),
-            ContainerState::Exited => write!(f, "exited"),
-            ContainerState::Dead => write!(f, "dead"),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct InspectResult {
-    pub state: ContainerState,
-    pub pid: Option<u32>,
-    pub ip: Option<String>,
-    pub memory_limit: Option<u64>,
-    pub cpu_quota: Option<f64>,
-}
-
 #[derive(Clone, Debug)]
 pub struct ExecResult {
     pub exit_code: i32,
@@ -84,6 +56,14 @@ pub struct HostedSubject {
     pub addr: Option<String>,
 }
 
+/// Render a substrate-specific value onto a Lua value. Each substrate owns
+/// the shape of its `inspect` result (and any other associated type it
+/// surfaces to Lua) and implements this trait so the bindings stay generic
+/// over `S: Substrate`.
+pub trait ToLua {
+    fn to_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value>;
+}
+
 pub trait Substrate: Send + Sync + 'static {
     /// Human-readable substrate name (e.g. `"docker"`), matched against the
     /// `substrate` field of `dstest.config()`.
@@ -92,11 +72,23 @@ pub trait Substrate: Send + Sync + 'static {
     /// Substrate-specific data describing how to host a subject.
     type SubjectData: Clone + Send + Sync + 'static;
 
+    /// Substrate-specific inspect result, surfaced to Lua via [`ToLua`].
+    type Inspect: ToLua + Send + 'static;
+
+    /// Substrate-specific log-query options, parsed from the optional Lua
+    /// table passed to `dstest.logs`.
+    type LogOpts: Default + Send + Sync + 'static;
+
     /// Parse the Lua table from `dstest.setup()` into this substrate's
     /// `SubjectData`. Each substrate owns its own config schema — Docker
     /// reads `image`/`ports`/`volumes`/`env`/`cmd`, other substrates can
     /// read whatever fields they need.
     fn parse_subject(&self, table: &mlua::Table) -> Result<Self::SubjectData, String>;
+
+    /// Parse the optional Lua table from `dstest.logs` into this
+    /// substrate's `LogOpts`. `None` means no options table was passed;
+    /// the substrate should fall back to [`Default`].
+    fn parse_log_opts(&self, table: Option<&mlua::Table>) -> Result<Self::LogOpts, String>;
 
     /// Pull/create/start a subject and return its instance id plus an
     /// optional reachable address.
@@ -106,30 +98,9 @@ pub trait Substrate: Send + Sync + 'static {
     fn clear_faults(&self, subject: &Subject) -> Result<(), String>;
     fn teardown(&self, subject: Subject) -> Result<(), String>;
 
-    fn logs(&self, subject: &Subject, opts: LogOptions) -> Result<Vec<LogEntry>, String>;
-    fn inspect(&self, subject: &Subject) -> Result<InspectResult, String>;
+    fn logs(&self, subject: &Subject, opts: Self::LogOpts) -> Result<Vec<LogEntry>, String>;
+    fn inspect(&self, subject: &Subject) -> Result<Self::Inspect, String>;
     fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String>;
-}
-
-#[derive(Clone, Debug)]
-pub struct LogOptions {
-    pub stdout: bool,
-    pub stderr: bool,
-    pub tail: Option<String>,
-    pub since: Option<i32>,
-    pub timestamps: bool,
-}
-
-impl Default for LogOptions {
-    fn default() -> Self {
-        Self {
-            stdout: true,
-            stderr: true,
-            tail: None,
-            since: None,
-            timestamps: false,
-        }
-    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use mlua::{Lua, Result, Table};
 
 use crate::engine::context::BindingContext;
-use crate::substrate::{LogOptions, Stream, Subject, Substrate};
+use crate::substrate::{Stream, Subject, Substrate};
 
 pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let substrate = Arc::clone(&ctx.substrate);
@@ -11,17 +11,9 @@ pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>
     let logs_fn = lua.create_function(move |lua, (id, opts): (String, Option<Table>)| {
         let subject = Subject::new(id);
 
-        let log_opts = if let Some(opts) = opts {
-            LogOptions {
-                stdout: opts.get("stdout").unwrap_or(true),
-                stderr: opts.get("stderr").unwrap_or(true),
-                tail: opts.get("tail").ok(),
-                since: opts.get("since").ok(),
-                timestamps: opts.get("timestamps").unwrap_or(false),
-            }
-        } else {
-            LogOptions::default()
-        };
+        let log_opts = substrate
+            .parse_log_opts(opts.as_ref())
+            .map_err(mlua::Error::RuntimeError)?;
 
         let entries = substrate
             .logs(&subject, log_opts)

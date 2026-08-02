@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{self, Display};
 use std::fs;
 use std::sync::OnceLock;
 
@@ -19,8 +20,7 @@ use futures_util::TryStreamExt;
 use tracing::{debug, info, warn};
 
 use crate::substrate::{
-    ContainerState, ExecResult, Fault, HostedSubject, InspectResult, LogEntry, LogOptions, Stream,
-    Subject, Substrate,
+    ExecResult, Fault, HostedSubject, LogEntry, Stream, Subject, Substrate, ToLua,
 };
 
 pub fn runtime() -> &'static tokio::runtime::Runtime {
@@ -56,6 +56,67 @@ impl Docker {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DockerState {
+    Running,
+    Paused,
+    Exited,
+    Dead,
+}
+
+impl Display for DockerState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DockerState::Running => write!(f, "running"),
+            DockerState::Paused => write!(f, "paused"),
+            DockerState::Exited => write!(f, "exited"),
+            DockerState::Dead => write!(f, "dead"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DockerInspect {
+    pub state: DockerState,
+    pub pid: Option<u32>,
+    pub ip: Option<String>,
+    pub memory_limit: Option<u64>,
+    pub cpu_quota: Option<f64>,
+}
+
+impl ToLua for DockerInspect {
+    fn to_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+        let t = lua.create_table()?;
+        t.set("state", self.state.to_string())?;
+        t.set("pid", self.pid)?;
+        t.set("ip", self.ip)?;
+        t.set("memory_limit", self.memory_limit)?;
+        t.set("cpu_quota", self.cpu_quota)?;
+        Ok(mlua::Value::Table(t))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DockerLogOpts {
+    pub stdout: bool,
+    pub stderr: bool,
+    pub tail: Option<String>,
+    pub since: Option<i32>,
+    pub timestamps: bool,
+}
+
+impl Default for DockerLogOpts {
+    fn default() -> Self {
+        Self {
+            stdout: true,
+            stderr: true,
+            tail: None,
+            since: None,
+            timestamps: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DockerSubjectData {
     pub image: String,
@@ -69,6 +130,8 @@ impl Substrate for Docker {
     const NAME: &'static str = "docker";
 
     type SubjectData = DockerSubjectData;
+    type Inspect = DockerInspect;
+    type LogOpts = DockerLogOpts;
 
     fn parse_subject(&self, table: &mlua::Table) -> Result<Self::SubjectData, String> {
         let image: String = table
@@ -86,6 +149,19 @@ impl Substrate for Docker {
             ports,
             volumes,
             env,
+        })
+    }
+
+    fn parse_log_opts(&self, table: Option<&mlua::Table>) -> Result<Self::LogOpts, String> {
+        let Some(table) = table else {
+            return Ok(DockerLogOpts::default());
+        };
+        Ok(DockerLogOpts {
+            stdout: table.get("stdout").unwrap_or(true),
+            stderr: table.get("stderr").unwrap_or(true),
+            tail: table.get("tail").ok(),
+            since: table.get("since").ok(),
+            timestamps: table.get("timestamps").unwrap_or(false),
         })
     }
 
@@ -239,7 +315,7 @@ impl Substrate for Docker {
         Ok(())
     }
 
-    fn logs(&self, subject: &Subject, opts: LogOptions) -> Result<Vec<LogEntry>, String> {
+    fn logs(&self, subject: &Subject, opts: DockerLogOpts) -> Result<Vec<LogEntry>, String> {
         let id = Self::container_id(subject).to_string();
 
         let mut builder = LogsOptionsBuilder::new()
@@ -281,7 +357,7 @@ impl Substrate for Docker {
             .collect()
     }
 
-    fn inspect(&self, subject: &Subject) -> Result<InspectResult, String> {
+    fn inspect(&self, subject: &Subject) -> Result<DockerInspect, String> {
         let id = Self::container_id(subject).to_string();
 
         let info = self
@@ -292,14 +368,14 @@ impl Substrate for Docker {
             .map_err(|e| format!("Inspect failed: {}", e))?;
 
         let state = match info.state.as_ref().and_then(|s| s.status) {
-            Some(ContainerStateStatusEnum::RUNNING) => ContainerState::Running,
-            Some(ContainerStateStatusEnum::PAUSED) => ContainerState::Paused,
-            Some(ContainerStateStatusEnum::EXITED) => ContainerState::Exited,
-            Some(ContainerStateStatusEnum::DEAD) => ContainerState::Dead,
-            _ => ContainerState::Dead,
+            Some(ContainerStateStatusEnum::RUNNING) => DockerState::Running,
+            Some(ContainerStateStatusEnum::PAUSED) => DockerState::Paused,
+            Some(ContainerStateStatusEnum::EXITED) => DockerState::Exited,
+            Some(ContainerStateStatusEnum::DEAD) => DockerState::Dead,
+            _ => DockerState::Dead,
         };
 
-        Ok(InspectResult {
+        Ok(DockerInspect {
             state,
             pid: info.state.as_ref().and_then(|s| s.pid.map(|p| p as u32)),
             ip: info
