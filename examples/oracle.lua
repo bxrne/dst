@@ -6,8 +6,9 @@ dstest.config({
     substrate = "docker",
     seed = 999,
     weights = {
-        pause = 0.3,
-        kill = 0.3,
+        pause = 0.2,
+        kill = 0.2,
+        ["deprive:disk"] = 0.2,
         ["deprive:memory"] = 0.2,
         ["deprive:cpu"] = 0.2,
     },

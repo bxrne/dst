@@ -394,28 +394,105 @@ impl Docker {
         subject.id.strip_prefix("docker/").unwrap_or(&subject.id)
     }
 
+    /// Resolve the host's root filesystem to the physical whole block device
+    /// backing it, walking through dm-crypt/LVM/btrfs layers and partitions.
     fn root_block_device() -> Option<String> {
+        let source = Self::root_mount_source()?;
+        let canonical = fs::canonicalize(&source).ok()?;
+        let name = canonical.file_name()?.to_string_lossy().to_string();
+        Self::resolve_to_physical(&name)
+    }
+
+    /// Extract the source device of the root mount from `/proc/self/mountinfo`.
+    /// The mount source sits two fields past the optional-fields separator `-`.
+    fn root_mount_source() -> Option<String> {
         let mountinfo = fs::read_to_string("/proc/self/mountinfo").ok()?;
         for line in mountinfo.lines() {
             let fields: Vec<&str> = line.split_whitespace().collect();
             if fields.len() > 4 && fields[4] == "/" {
-                let dev = fields.get(2)?;
-                let (major, _minor) = dev.split_once(':')?;
-                let major: i32 = major.parse().ok()?;
-                let partitions = fs::read_to_string("/proc/partitions").ok()?;
-                for pline in partitions.lines().skip(2) {
-                    let pfields: Vec<&str> = pline.split_whitespace().collect();
-                    if pfields.len() >= 4 {
-                        let pmajor: i32 = pfields[0].parse().ok()?;
-                        if pmajor == major {
-                            let name = pfields[3];
-                            return Some(format!("/dev/{}", name));
-                        }
-                    }
-                }
+                let dash = fields.iter().position(|f| *f == "-")?;
+                return fields.get(dash + 2).map(|s| s.to_string());
             }
         }
         None
+    }
+
+    /// Walk a block device name through slaves (dm-crypt/LVM/RAID) and
+    /// partition parents to the underlying physical whole device, returning
+    /// its `/dev/<name>` path. Verifies the result is throttleable on cgroup
+    /// v2 via `io.stat`, since `io.max` only accepts whole-device major:minor
+    /// pairs that appear there.
+    fn resolve_to_physical(name: &str) -> Option<String> {
+        let mut current = name.to_string();
+        loop {
+            // If this device is backed by slaves (e.g. dm-0 backed by
+            // nvme0n1p2), recurse into the first slave.
+            let slaves_dir = format!("/sys/class/block/{}/slaves", current);
+            if let Ok(slaves) = fs::read_dir(&slaves_dir)
+                && let Some(slave) = slaves.flatten().next()
+            {
+                current = slave.file_name().to_string_lossy().to_string();
+                continue;
+            }
+            // If this device is a partition, walk to its parent whole device.
+            let partition_file = format!("/sys/class/block/{}/partition", current);
+            if fs::metadata(&partition_file).is_ok() {
+                let parent = fs::canonicalize(format!("/sys/class/block/{}", current))
+                    .ok()?
+                    .parent()?
+                    .file_name()?
+                    .to_string_lossy()
+                    .to_string();
+                current = parent;
+                continue;
+            }
+            break;
+        }
+        let dev_file = format!("/sys/class/block/{}/dev", current);
+        let majmin = fs::read_to_string(dev_file).ok()?.trim().to_string();
+        if !Self::in_io_stat(&majmin) {
+            debug!(
+                "resolved device /dev/{} ({} not in io.stat; not throttleable on cgroup v2)",
+                current, majmin
+            );
+            return None;
+        }
+        Some(format!("/dev/{}", current))
+    }
+
+    /// Check whether a `major:minor` pair appears in `/sys/fs/cgroup/io.stat`.
+    fn in_io_stat(majmin: &str) -> bool {
+        let Ok(stat) = fs::read_to_string("/sys/fs/cgroup/io.stat") else {
+            return false;
+        };
+        stat.lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .any(|m| m == majmin)
+    }
+
+    /// Fallback: scan `/dev` for the first whole block device matching common
+    /// NVMe/SCSI/virtio prefixes, skipping char devices (e.g. `nvme0`) and
+    /// partitions. Prefers whole devices, falls back to partitions.
+    fn fallback_block_device() -> Option<String> {
+        let entries = fs::read_dir("/dev").ok()?;
+        let mut whole: Option<String> = None;
+        let mut partition: Option<String> = None;
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !(name.starts_with("nvme") || name.starts_with("sd") || name.starts_with("vd")) {
+                continue;
+            }
+            // Only real block devices have a sysfs entry under /sys/class/block.
+            if fs::metadata(format!("/sys/class/block/{}", name)).is_err() {
+                continue;
+            }
+            if fs::metadata(format!("/sys/class/block/{}/partition", name)).is_ok() {
+                partition.get_or_insert(format!("/dev/{}", name));
+            } else {
+                whole.get_or_insert(format!("/dev/{}", name));
+            }
+        }
+        whole.or(partition)
     }
 
     fn deprive_resource(&self, subject: &Subject, tier: &crate::fault::Tier) -> Result<(), String> {
@@ -424,21 +501,10 @@ impl Docker {
         match tier {
             crate::fault::Tier::Disk => {
                 let device = Self::root_block_device()
-                    .or_else(|| {
-                        fs::read_dir("/dev").ok().and_then(|entries| {
-                            for entry in entries.flatten() {
-                                let name = entry.file_name().to_string_lossy().to_string();
-                                if name.starts_with("nvme")
-                                    || name.starts_with("sd")
-                                    || name.starts_with("vd")
-                                {
-                                    return Some(format!("/dev/{}", name));
-                                }
-                            }
-                            None
-                        })
-                    })
-                    .unwrap_or_else(|| "/dev/sda".to_string());
+                    .or_else(Self::fallback_block_device)
+                    .ok_or_else(|| {
+                        "could not resolve a throttleable block device for disk fault".to_string()
+                    })?;
 
                 info!("Throttling disk I/O for container id={} on {}", id, device);
                 let update_config = ContainerUpdateBody {
@@ -631,5 +697,44 @@ mod tests {
     #[test]
     fn test_docker_new() {
         assert!(Docker::new().is_ok());
+    }
+
+    /// The root block device must resolve to a real, throttleable whole
+    /// device: it must exist, be a block device, and its `major:minor` must
+    /// appear in `/sys/fs/cgroup/io.stat` (the cgroup v2 throttle list).
+    #[test]
+    fn test_root_block_device_resolves_to_throttleable_whole_device() {
+        let Some(device) = Docker::root_block_device() else {
+            return; // host without a resolvable root device (e.g. CI)
+        };
+        let meta = fs::metadata(&device)
+            .unwrap_or_else(|e| panic!("resolved device {device} missing: {e}"));
+        use std::os::unix::fs::FileTypeExt;
+        assert!(
+            meta.file_type().is_block_device(),
+            "{device} is not a block device",
+        );
+        let name = device.strip_prefix("/dev/").unwrap_or(&device);
+        assert!(
+            fs::metadata(format!("/sys/class/block/{name}/partition")).is_err(),
+            "{device} is a partition, not a whole device",
+        );
+        let majmin = fs::read_to_string(format!("/sys/class/block/{name}/dev"))
+            .expect("sysfs dev file")
+            .trim()
+            .to_string();
+        assert!(
+            Docker::in_io_stat(&majmin),
+            "{device} ({majmin}) not in io.stat — not throttleable on cgroup v2",
+        );
+    }
+
+    /// `root_mount_source` must find a non-empty source path for the root mount.
+    #[test]
+    fn test_root_mount_source_present() {
+        let source = Docker::root_mount_source();
+        assert!(source.is_some(), "no root mount source found in mountinfo");
+        let source = source.unwrap();
+        assert!(!source.is_empty());
     }
 }
