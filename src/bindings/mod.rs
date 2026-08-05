@@ -7,6 +7,7 @@ mod pg;
 mod random;
 mod storage;
 mod subs;
+mod workload;
 
 use mlua::{Lua, Table};
 
@@ -31,6 +32,7 @@ pub fn register_all<S: Substrate>(
     pg::Pg::register(lua, dstest, ctx)?;
     storage::Storage::register(lua, dstest, ctx)?;
     random::Random::register(lua, dstest, ctx)?;
+    workload::Workload::register(lua, dstest, ctx)?;
 
     Ok(())
 }

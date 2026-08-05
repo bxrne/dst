@@ -29,7 +29,6 @@ fn main() {
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
 
-    // Exit codes: 0 = ok, 1 = script error, 2 = oracle failure, 3 = infra error.
     let code = rt.block_on(async {
         let result = engine.execute(&script).await;
         engine.shutdown().await;

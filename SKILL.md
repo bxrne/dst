@@ -4,7 +4,7 @@ description: Deterministic simulation testing for containerized services. Write 
 license: MIT
 metadata:
   author: bxrne
-  version: "0.1.10"
+  version: "0.1.12"
 ---
 
 # dstest
@@ -41,6 +41,9 @@ cargo install --path .
   and partitions between two subjects (see `dstest.net` in [DOCS.md](DOCS.md)).
 - **Seeded workloads**: `dstest.random.*` (int, float, bool, choice, shuffle)
   for reproducible non-fault randomness (see `dstest.random` in [DOCS.md](DOCS.md)).
+- **Workload generation**: `dstest.workload.http` (manual or OpenAPI-driven) and
+  `dstest.workload.pg` for sustained traffic with latency stats (see
+  `dstest.workload` in [DOCS.md](DOCS.md)).
 - **Startup ordering**: `depends = { ... }` in `dstest.setup` waits for
   upstream subjects to reach a running state as reported by the substrate.
 

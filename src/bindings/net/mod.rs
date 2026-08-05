@@ -4,9 +4,9 @@ use crate::bindings::LuaModule;
 use crate::engine::context::BindingContext;
 use crate::substrate::Substrate;
 
-mod http;
-mod link;
-mod tcp;
+pub mod http;
+pub mod link;
+pub mod tcp;
 
 pub struct Net;
 

@@ -6,16 +6,12 @@
 --- Loads and runs each test_*.lua file in sequence within the same Lua VM.
 --- Each test gets its own config and subjects. Errors are caught and
 --- reported without aborting subsequent tests.
----
---- Each test file must:
----   - Start with `--- @diagnostic disable:undefined-global`
----   - Use dstest.config/setup/exec/etc. normally
----   - Raise an error or call dstest.error on failure
 
 local test_files = {
 	"tests/test_config.lua",
 	"tests/test_fault.lua",
 	"tests/test_oracle.lua",
+	"tests/test_workload_http.lua",
 }
 
 dstest.info(string.format("found %d test files", #test_files))

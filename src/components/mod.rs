@@ -15,4 +15,6 @@ pub mod storage;
 
 pub use clock::{ClockControl, ClockState};
 pub use network::{Direction, LinkId, NetworkControl, PartitionMode};
+#[allow(unused_imports)]
+pub use nop::{NopClock, NopNetwork, NopStorage};
 pub use storage::{StorageControl, StorageOpts};

@@ -4,8 +4,8 @@ use crate::bindings::LuaModule;
 use crate::engine::context::BindingContext;
 use crate::substrate::Substrate;
 
-mod command;
-mod pool;
+pub mod command;
+pub mod pool;
 
 pub struct Pg;
 

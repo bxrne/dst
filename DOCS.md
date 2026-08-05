@@ -31,6 +31,7 @@ others are namespaced under sub-tables.
 | `dstest.pg.connect`, `dstest.pg.query`, `dstest.pg.close` | PostgreSQL | [`src/bindings/pg/README.md`](src/bindings/pg/README.md) |
 | `dstest.clock`, `dstest.clock.now`, `dstest.clock.virtual` | timestamps, virtual clocks | [`src/bindings/clock/README.md`](src/bindings/clock/README.md) |
 | `dstest.random.*` | seeded reproducible randomness | [`src/bindings/random/README.md`](src/bindings/random/README.md) |
+| `dstest.workload.http`, `dstest.workload.pg` | sustained HTTP/PG traffic with stats | [`src/bindings/workload/README.md`](src/bindings/workload/README.md) |
 | `dstest.debug`, `dstest.info`, `dstest.warn`, `dstest.error` | logging | [`src/bindings/log/README.md`](src/bindings/log/README.md) |
 
 ## Configs and subjects
