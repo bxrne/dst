@@ -35,19 +35,19 @@ cargo install --path .
 ## Extra Capabilities
 
 - **Virtual clocks** — pin a subject's `CLOCK_REALTIME` to an epoch and advance
-  it deterministically via `dstest.clock.virtual(s)` (see
-  [`src/bindings/clock/README.md`](src/bindings/clock/README.md)).
+  it deterministically via `dstest.clock.virtual(s)` (see `dstest.clock` in
+  [DOCS.md](DOCS.md)).
 - **Proxied network faults** — `dstest.net.link(a, b, port)` adds latency, loss,
-  and partitions between two subjects (see
-  [`src/bindings/net/README.md`](src/bindings/net/README.md)).
+  and partitions between two subjects (see `dstest.net` in [DOCS.md](DOCS.md)).
 - **Storage faults** — `dstest.storage.*` injects I/O errors, byte corruption,
   and snapshot/restore on a `dm-flakey` virtual disk (requires root; see
-  [`src/bindings/storage/README.md`](src/bindings/storage/README.md)).
+  `dstest.storage` in [DOCS.md](DOCS.md)).
 - **Seeded workloads** — `dstest.random.*` (int, float, bool, choice, shuffle)
-  for reproducible non-fault randomness (see
-  [`src/bindings/random/README.md`](src/bindings/random/README.md)).
+  for reproducible non-fault randomness (see `dstest.random` in [DOCS.md](DOCS.md)).
 - **Startup ordering** — `depends = { ... }` in `dstest.setup` waits for
   upstream subjects' ports to accept TCP connections.
+
+For the complete Lua API surface, run `cargo doc --open` (or read [DOCS.md](DOCS.md)).
 
 ## Available Faults
 
