@@ -65,6 +65,33 @@ local subject = dstest.setup(docker_config, {
 | `env` | table | No | Key-value table of environment variables |
 | `cmd` | table | No | Array of command arguments overriding the entrypoint |
 
+### Virtual clock
+
+Subjects can opt into a harness-controlled virtual clock:
+
+```lua
+local s = dstest.setup(cfg, {
+    image = "kennethreitz/httpbin",
+    ports = { 80 },
+    clock = { virtual = true, start_epoch = 1600000000 },
+})
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `virtual` | boolean | Set `true` to enable the virtual clock |
+| `start_epoch` | number | Unix epoch seconds to pin the clock at (defaults to real now) |
+
+With a virtual clock, the subject's `CLOCK_REALTIME` / `time()` is frozen at
+the start epoch and only moves when you call `dstest.clock.virtual(subject)`
+methods (`:advance(ms)`, `:set_offset(ms)`, `:now()`). `CLOCK_MONOTONIC` is
+not faked — sleeps and busy-waits use real elapsed time, which is correct for
+DST (the virtual clock only moves when dstest says so).
+
+Limitations: only dynamically linked glibc binaries are affected (musl/static
+binaries — e.g. Alpine, Go — ignore `LD_PRELOAD`). `set_rate` and `release`
+are unsupported on the manual clock.
+
 Containers are named `dstest-<config>-<n>` and labelled `dstest.managed=true`;
 a name collision with a stale dstest container is cleaned up automatically.
 

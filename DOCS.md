@@ -105,6 +105,7 @@ container-image drift (pin images by digest to avoid it).
 
 | File | Demonstrates |
 |------|--------------|
-| [`examples/httpbin.lua`](examples/httpbin.lua) | HTTP analysis: GET/POST, status/body assertions, latency timing |
-| [`examples/pg.lua`](examples/pg.lua) | PostgreSQL lifecycle: connect, create table, insert, query, close |
+| [`examples/httpbin.lua`](examples/httpbin.lua) | HTTP analysis: GET/POST, status/body assertions, latency |
+| [`examples/pg.lua`](examples/pg.lua) | PostgreSQL: connect, create table, insert, query, close |
 | [`examples/oracle.lua`](examples/oracle.lua) | Fault injection with oracle predicates and invariants |
+| [`examples/clock.lua`](examples/clock.lua) | Virtual clock injection: pin, advance, verify |

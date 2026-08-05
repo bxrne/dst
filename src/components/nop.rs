@@ -2,14 +2,8 @@
 //! component. All control operations inherit the trait defaults, which return
 //! "not supported" errors; `ClockControl::now` still reports real wall time.
 
-use super::clock::ClockControl;
 use super::network::NetworkControl;
 use super::storage::StorageControl;
-
-#[derive(Default)]
-pub struct NopClock;
-
-impl ClockControl for NopClock {}
 
 #[derive(Default)]
 pub struct NopNetwork;

@@ -19,10 +19,14 @@ use bollard::query_parameters::{
 use futures_util::TryStreamExt;
 use tracing::{debug, info, warn};
 
-use crate::components::{NopClock, NopNetwork, NopStorage};
+use crate::components::{NopNetwork, NopStorage};
 use crate::substrate::{
     ExecResult, Fault, HostedSubject, LogEntry, Stream, Subject, Substrate, ToLua,
 };
+
+pub mod clock;
+
+use clock::{ClockSpec, DockerClock};
 
 pub struct Docker {
     connection: BollardDocker,
@@ -31,7 +35,7 @@ pub struct Docker {
     /// treats absent fields as "no change", so clearing requires writing
     /// values back).
     original_limits: Mutex<HashMap<String, OriginalLimits>>,
-    clock: NopClock,
+    clock: DockerClock,
     network: NopNetwork,
     storage: NopStorage,
 }
@@ -51,12 +55,28 @@ impl Docker {
         let connection = BollardDocker::connect_with_local_defaults()
             .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
         Ok(Self {
+            clock: DockerClock::new(connection.clone()),
             connection,
             original_limits: Mutex::new(HashMap::new()),
-            clock: NopClock,
             network: NopNetwork,
             storage: NopStorage,
         })
+    }
+
+    /// Pull an image (shared by subject hosting and clock asset builds).
+    pub(crate) async fn pull_image(conn: &BollardDocker, image: &str) -> Result<(), String> {
+        conn.create_image(
+            Some(CreateImageOptions {
+                from_image: Some(image.to_string()),
+                ..Default::default()
+            }),
+            None,
+            None,
+        )
+        .try_collect::<Vec<_>>()
+        .await
+        .map_err(|e| format!("Failed to pull image: {}", e))?;
+        Ok(())
     }
 }
 
@@ -128,6 +148,7 @@ pub struct DockerSubjectData {
     pub ports: Option<Vec<u16>>,
     pub volumes: Option<Vec<String>>,
     pub env: Option<Vec<String>>,
+    pub clock: Option<ClockSpec>,
 }
 
 impl Substrate for Docker {
@@ -136,7 +157,7 @@ impl Substrate for Docker {
     type SubjectData = DockerSubjectData;
     type Inspect = DockerInspect;
     type LogOpts = DockerLogOpts;
-    type Clock = NopClock;
+    type Clock = DockerClock;
     type Network = NopNetwork;
     type Storage = NopStorage;
 
@@ -150,12 +171,21 @@ impl Substrate for Docker {
         let env: Option<HashMap<String, String>> = table.get("env").ok();
         let env = env.map(|e| e.into_iter().map(|(k, v)| format!("{}={}", k, v)).collect());
 
+        // Optional virtual clock: clock = { virtual = true, start_epoch = <unix secs> }
+        let clock = match table.get::<mlua::Table>("clock") {
+            Ok(t) if t.get::<bool>("virtual").unwrap_or(false) => Some(ClockSpec {
+                start_epoch_secs: t.get("start_epoch").ok(),
+            }),
+            _ => None,
+        };
+
         Ok(DockerSubjectData {
             image,
             cmd,
             ports,
             volumes,
             env,
+            clock,
         })
     }
 
@@ -175,17 +205,20 @@ impl Substrate for Docker {
     async fn host(&self, name: &str, data: &Self::SubjectData) -> Result<HostedSubject, String> {
         let conn = &self.connection;
 
-        conn.create_image(
-            Some(CreateImageOptions {
-                from_image: Some(data.image.clone()),
-                ..Default::default()
-            }),
-            None,
-            None,
-        )
-        .try_collect::<Vec<_>>()
-        .await
-        .map_err(|e| format!("Failed to pull image: {}", e))?;
+        Self::pull_image(conn, &data.image).await?;
+
+        // Virtual clock opt-in: prepare libfaketime env + control-file mount.
+        let clock_prep = match &data.clock {
+            Some(spec) => Some(self.clock.prepare(name, spec).await?),
+            None => None,
+        };
+
+        let mut env = data.env.clone().unwrap_or_default();
+        let mut binds = data.volumes.clone().unwrap_or_default();
+        if let Some(prep) = &clock_prep {
+            env.extend(prep.env.iter().cloned());
+            binds.push(prep.bind.clone());
+        }
 
         let mut labels = HashMap::new();
         labels.insert("dstest.managed".to_string(), "true".to_string());
@@ -214,10 +247,10 @@ impl Substrate for Docker {
                     }
                     map
                 }),
-                binds: data.volumes.clone(),
+                binds: if binds.is_empty() { None } else { Some(binds) },
                 ..Default::default()
             }),
-            env: data.env.clone(),
+            env: if env.is_empty() { None } else { Some(env) },
             ..Default::default()
         };
 
@@ -276,6 +309,10 @@ impl Substrate for Docker {
             .lock()
             .expect("poisoned limits lock")
             .insert(container_id.clone(), originals);
+
+        if let Some(prep) = clock_prep {
+            self.clock.register(container_id.clone(), prep.ctl_path);
+        }
 
         info!("Started container name={} id={}", name, container_id);
         Ok(HostedSubject {
@@ -355,6 +392,8 @@ impl Substrate for Docker {
             .lock()
             .expect("poisoned limits lock")
             .remove(&id);
+
+        self.clock.unregister(&id);
 
         Ok(())
     }
