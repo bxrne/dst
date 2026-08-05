@@ -151,12 +151,21 @@ impl DockerNetwork {
             .await
             .map_err(|e| format!("create exec failed: {}", e))?;
 
-        self.connection
+        let result = self
+            .connection
             .start_exec(&exec.id, Some(bollard::exec::StartExecOptions::default()))
             .await
             .map_err(|e| format!("start exec failed: {}", e))?;
 
-        // Wait for exec to finish and check exit code.
+        // Drain the output stream so the exec completes.
+        if let bollard::exec::StartExecResults::Attached { output, .. } = result {
+            use futures_util::TryStreamExt;
+            output
+                .try_collect::<Vec<_>>()
+                .await
+                .map_err(|e| format!("exec output failed: {}", e))?;
+        }
+
         let inspect = self
             .connection
             .inspect_exec(&exec.id)
@@ -165,8 +174,10 @@ impl DockerNetwork {
 
         let exit = inspect.exit_code.unwrap_or(-1);
         if exit != 0 {
-            // tc/iptables errors when rules don't exist are expected during heal.
-            debug!("exec in {} exit {} (may be expected)", container_name, exit);
+            return Err(format!(
+                "exec in {} failed (exit {}): {:?}",
+                container_name, exit, cmd
+            ));
         }
         Ok(())
     }
@@ -353,13 +364,8 @@ impl NetworkControl for DockerNetwork {
         match mode {
             PartitionMode::Blackhole => {
                 // Drop all outbound traffic (peers see timeouts).
-                self.exec_in_proxy(
-                    &container_name,
-                    &[
-                        "tc", "qdisc", "replace", "dev", "eth0", "root", "netem", "loss", "100%",
-                    ],
-                )
-                .await?;
+                self.exec_in_proxy(&container_name, &["iptables", "-A", "OUTPUT", "-j", "DROP"])
+                    .await?;
             }
             PartitionMode::Reset => {
                 // Reject all outbound TCP with RST.
@@ -394,15 +400,12 @@ impl NetworkControl for DockerNetwork {
                 .clone()
         };
 
-        // Remove tc qdisc (errors if none exists — expected).
-        self.exec_in_proxy(
-            &container_name,
-            &["tc", "qdisc", "del", "dev", "eth0", "root"],
-        )
-        .await
-        .ok();
+        // Remove iptables OUTPUT DROP (blackhole) — errors if absent.
+        self.exec_in_proxy(&container_name, &["iptables", "-D", "OUTPUT", "-j", "DROP"])
+            .await
+            .ok();
 
-        // Remove iptables reject rule (errors if none exists — expected).
+        // Remove iptables OUTPUT tcp-reset (reset partition) — errors if absent.
         self.exec_in_proxy(
             &container_name,
             &[
@@ -416,6 +419,14 @@ impl NetworkControl for DockerNetwork {
                 "--reject-with",
                 "tcp-reset",
             ],
+        )
+        .await
+        .ok();
+
+        // Remove tc qdisc (latency) — errors if absent.
+        self.exec_in_proxy(
+            &container_name,
+            &["tc", "qdisc", "del", "dev", "eth0", "root"],
         )
         .await
         .ok();
