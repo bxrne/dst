@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use mlua::{Lua, Result, Table};
 
-use crate::components::NetworkControl;
+use crate::components::{NetworkControl, StorageControl};
 use crate::config::Config;
 use crate::engine::context::BindingContext;
 use crate::substrate::Substrate;
@@ -33,6 +33,8 @@ pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>
             randomseed.call::<()>(seed)?;
             // Seed the network impairment RNG.
             substrate.network().set_seed(seed);
+            // Seed storage fault randomness (e.g. corrupt offsets).
+            substrate.storage().set_seed(seed);
             // Seed the workload RNG (separate stream from the fault tree).
             *workload_rng.lock().expect("poisoned rng lock") =
                 Some(rand::SeedableRng::seed_from_u64(seed));

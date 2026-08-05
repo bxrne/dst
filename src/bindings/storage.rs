@@ -2,6 +2,35 @@
 //!
 //! Dispatches through the substrate's `StorageControl` implementation.
 //! Substrates without virtual storage return "not supported" errors.
+//!
+//! # Setup (Docker)
+//!
+//! Opt in at subject creation — the disk is prepared before the container
+//! starts and bind-mounted at `mount`:
+//!
+//! ```lua
+//! local s = dstest.setup(cfg, {
+//!     image = "alpine:3.20",
+//!     cmd = { "sleep", "300" },
+//!     storage = { flaky = true, mount = "/data", size_mb = 64 },
+//! })
+//! ```
+//!
+//! Requires root on the host (loop devices + device-mapper `dm-flakey`).
+//!
+//! # Runtime API
+//!
+//! | Function | Effect |
+//! |----------|--------|
+//! | `dstest.storage.error(id, on)` | Toggle EIO on all I/O |
+//! | `dstest.storage.drop_writes(id, on)` | ACK writes but discard them |
+//! | `dstest.storage.corrupt(id, n)` | Flip `n` bytes (seeded) |
+//! | `dstest.storage.snapshot(id)` | Snapshot backing store → id |
+//! | `dstest.storage.restore(id, snap)` | Restore a snapshot |
+//! | `dstest.storage.slow(id, ms)` | Not supported on dm-flakey |
+//! | `dstest.storage.attach(id, opts)` | Rejected — configure at setup |
+//!
+//! `corrupt` offsets are deterministic given the experiment `seed`.
 
 use std::sync::Arc;
 

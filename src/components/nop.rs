@@ -2,7 +2,7 @@
 //! component. All control operations inherit the trait defaults, which return
 //! "not supported" errors. Kept for future substrates that don't support a
 //! given component; the Docker substrate provides real implementations for
-//! clock and network, and `NopStorage` for storage (until dm-flakey lands).
+//! clock, network, and storage (`DockerStorage` via dm-flakey).
 
 use super::network::NetworkControl;
 use super::storage::StorageControl;
@@ -15,6 +15,7 @@ pub struct NopNetwork;
 impl NetworkControl for NopNetwork {}
 
 /// No-op storage control for substrates without virtual storage.
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct NopStorage;
 

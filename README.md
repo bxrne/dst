@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/bxrne/dstest/actions/workflows/ci.yml/badge.svg)](https://github.com/bxrne/dstest/actions/workflows/ci.yml)
 [![Release](https://github.com/bxrne/dstest/actions/workflows/release.yml/badge.svg)](https://github.com/bxrne/dstest/actions/workflows/release.yml)
+![Tag](https://img.shields.io/github/v/tag/bxrne/dstest?include_prereleases&sort=semver&style=flat)
 
 Deterministic Simulation Testing for containerised services.
 

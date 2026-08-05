@@ -31,6 +31,10 @@ impl StorageOpts {
 
 /// Fault-injectable virtual disk control, per subject.
 pub trait StorageControl: Send + Sync + 'static {
+    /// Set the root seed for deterministic operations (e.g. `corrupt` offsets).
+    /// Called by the engine when a config with a seed is registered.
+    fn set_seed(&self, _seed: u64) {}
+
     /// Attach a virtual disk to a subject. Must be called while the subject
     /// is being set up or while it tolerates a new mount appearing.
     async fn attach(&self, _subject: &Subject, _opts: StorageOpts) -> Result<(), String> {

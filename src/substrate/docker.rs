@@ -19,23 +19,24 @@ use bollard::query_parameters::{
 use futures_util::TryStreamExt;
 use tracing::{debug, info, warn};
 
-use crate::components::NopStorage;
 use crate::substrate::{
     ExecResult, Fault, HostedSubject, LogEntry, Stream, Subject, Substrate, ToLua,
 };
 
 pub mod clock;
 pub mod network;
+pub mod storage;
 
 use clock::{ClockSpec, DockerClock};
 use network::DockerNetwork;
+use storage::{DockerStorage, StorageSpec};
 
 pub struct Docker {
     connection: BollardDocker,
     original_limits: Mutex<HashMap<String, OriginalLimits>>,
     clock: DockerClock,
     network: DockerNetwork,
-    storage: NopStorage,
+    storage: DockerStorage,
 }
 
 /// Resource limits read back from inspect right after container start.
@@ -55,9 +56,9 @@ impl Docker {
         Ok(Self {
             clock: DockerClock::new(connection.clone()),
             network: DockerNetwork::new(connection.clone()),
+            storage: DockerStorage::new(),
             connection,
             original_limits: Mutex::new(HashMap::new()),
-            storage: NopStorage,
         })
     }
 
@@ -148,6 +149,7 @@ pub struct DockerSubjectData {
     pub env: Option<Vec<String>>,
     pub clock: Option<ClockSpec>,
     pub network_proxied: bool,
+    pub storage: Option<StorageSpec>,
 }
 
 impl Substrate for Docker {
@@ -158,7 +160,7 @@ impl Substrate for Docker {
     type LogOpts = DockerLogOpts;
     type Clock = DockerClock;
     type Network = DockerNetwork;
-    type Storage = NopStorage;
+    type Storage = DockerStorage;
 
     fn parse_subject(&self, table: &mlua::Table) -> Result<Self::SubjectData, String> {
         let image: String = table
@@ -185,6 +187,21 @@ impl Substrate for Docker {
             .and_then(|t| t.get::<bool>("proxied").ok())
             .unwrap_or(false);
 
+        // Optional virtual disk: storage = { flaky = true, mount = "/data", size_mb = 512 }
+        let storage = match table.get::<mlua::Table>("storage") {
+            Ok(t) if t.get::<bool>("flaky").unwrap_or(false) => {
+                let spec = StorageSpec {
+                    size_mb: t.get("size_mb").unwrap_or(512),
+                    mount: t
+                        .get("mount")
+                        .map_err(|_| "storage requires a `mount` field".to_string())?,
+                };
+                crate::components::StorageOpts::from(spec.clone()).validate()?;
+                Some(spec)
+            }
+            _ => None,
+        };
+
         Ok(DockerSubjectData {
             image,
             cmd,
@@ -193,6 +210,7 @@ impl Substrate for Docker {
             env,
             clock,
             network_proxied,
+            storage,
         })
     }
 
@@ -227,106 +245,136 @@ impl Substrate for Docker {
             binds.push(prep.bind.clone());
         }
 
-        let mut labels = HashMap::new();
-        labels.insert("dstest.managed".to_string(), "true".to_string());
-
-        let container_config = ContainerCreateBody {
-            image: Some(data.image.clone()),
-            cmd: data.cmd.clone(),
-            labels: Some(labels),
-            exposed_ports: data
-                .ports
-                .as_ref()
-                .map(|ports| ports.iter().map(|p| format!("{}/tcp", p)).collect()),
-            host_config: Some(HostConfig {
-                // Host port "0" => Docker assigns an ephemeral port, so
-                // multiple subjects (and parallel experiments) never collide.
-                port_bindings: data.ports.as_ref().map(|ports| {
-                    let mut map: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
-                    for p in ports {
-                        map.insert(
-                            format!("{}/tcp", p),
-                            Some(vec![PortBinding {
-                                host_ip: None,
-                                host_port: Some("0".to_string()),
-                            }]),
-                        );
-                    }
-                    map
-                }),
-                binds: if binds.is_empty() { None } else { Some(binds) },
-                // Proxied subjects get host.docker.internal so they can dial
-                // proxy listeners on the host.
-                extra_hosts: if data.network_proxied {
-                    Some(vec!["host.docker.internal:host-gateway".to_string()])
-                } else {
-                    None
-                },
-                ..Default::default()
-            }),
-            env: if env.is_empty() { None } else { Some(env) },
-            ..Default::default()
+        // Virtual disk opt-in: prepare dm-flakey device + bind mount.
+        // If later host steps fail, discard the pending device so we don't
+        // leak loop/dm resources.
+        let storage_prep = match &data.storage {
+            Some(spec) => Some(self.storage.prepare(name, spec)?),
+            None => None,
         };
-
-        let options = CreateContainerOptions {
-            name: Some(name.to_string()),
-            ..Default::default()
-        };
-
-        let container = match conn
-            .create_container(Some(options.clone()), container_config.clone())
-            .await
-        {
-            Ok(c) => c,
-            Err(BollardError::DockerResponseServerError {
-                status_code: 409, ..
-            }) => {
-                // Name collision: remove the stale dstest-managed container
-                // holding this name, then retry once.
-                self.remove_stale(name).await?;
-                conn.create_container(Some(options), container_config)
-                    .await
-                    .map_err(|e| format!("Failed to create container: {}", e))?
-            }
-            Err(e) => return Err(format!("Failed to create container: {}", e)),
-        };
-
-        let container_id = container.id.clone();
-        conn.start_container(&container_id, None::<StartContainerOptions>)
-            .await
-            .map_err(|e| format!("Failed to start container: {}", e))?;
-
-        let info = conn
-            .inspect_container(&container_id, None::<InspectContainerOptions>)
-            .await
-            .map_err(|e| format!("Inspect after start failed: {}", e))?;
-
-        // Discover the ephemeral host ports Docker assigned.
-        let addr = data.ports.as_ref().and_then(|ports| {
-            ports
-                .first()
-                .and_then(|p| Self::host_port_for(&info, *p).map(|hp| format!("localhost:{}", hp)))
-        });
-
-        let originals = info
-            .host_config
-            .as_ref()
-            .map(|hc| OriginalLimits {
-                memory: hc.memory,
-                memory_swap: hc.memory_swap,
-                cpu_period: hc.cpu_period,
-                cpu_quota: hc.cpu_quota,
-                blkio_weight: hc.blkio_weight,
-            })
-            .unwrap_or_default();
-        self.original_limits
-            .lock()
-            .expect("poisoned limits lock")
-            .insert(container_id.clone(), originals);
-
-        if let Some(prep) = clock_prep {
-            self.clock.register(container_id.clone(), prep.ctl_path);
+        if let Some(prep) = &storage_prep {
+            binds.push(prep.bind.clone());
         }
+
+        let host_result = async {
+            let mut labels = HashMap::new();
+            labels.insert("dstest.managed".to_string(), "true".to_string());
+
+            let container_config = ContainerCreateBody {
+                image: Some(data.image.clone()),
+                cmd: data.cmd.clone(),
+                labels: Some(labels),
+                exposed_ports: data
+                    .ports
+                    .as_ref()
+                    .map(|ports| ports.iter().map(|p| format!("{}/tcp", p)).collect()),
+                host_config: Some(HostConfig {
+                    // Host port "0" => Docker assigns an ephemeral port, so
+                    // multiple subjects (and parallel experiments) never collide.
+                    port_bindings: data.ports.as_ref().map(|ports| {
+                        let mut map: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
+                        for p in ports {
+                            map.insert(
+                                format!("{}/tcp", p),
+                                Some(vec![PortBinding {
+                                    host_ip: None,
+                                    host_port: Some("0".to_string()),
+                                }]),
+                            );
+                        }
+                        map
+                    }),
+                    binds: if binds.is_empty() { None } else { Some(binds) },
+                    // Proxied subjects get host.docker.internal so they can dial
+                    // proxy listeners on the host.
+                    extra_hosts: if data.network_proxied {
+                        Some(vec!["host.docker.internal:host-gateway".to_string()])
+                    } else {
+                        None
+                    },
+                    ..Default::default()
+                }),
+                env: if env.is_empty() { None } else { Some(env) },
+                ..Default::default()
+            };
+
+            let options = CreateContainerOptions {
+                name: Some(name.to_string()),
+                ..Default::default()
+            };
+
+            let container = match conn
+                .create_container(Some(options.clone()), container_config.clone())
+                .await
+            {
+                Ok(c) => c,
+                Err(BollardError::DockerResponseServerError {
+                    status_code: 409, ..
+                }) => {
+                    // Name collision: remove the stale dstest-managed container
+                    // holding this name, then retry once.
+                    self.remove_stale(name).await?;
+                    conn.create_container(Some(options), container_config)
+                        .await
+                        .map_err(|e| format!("Failed to create container: {}", e))?
+                }
+                Err(e) => return Err(format!("Failed to create container: {}", e)),
+            };
+
+            let container_id = container.id.clone();
+            conn.start_container(&container_id, None::<StartContainerOptions>)
+                .await
+                .map_err(|e| format!("Failed to start container: {}", e))?;
+
+            let info = conn
+                .inspect_container(&container_id, None::<InspectContainerOptions>)
+                .await
+                .map_err(|e| format!("Inspect after start failed: {}", e))?;
+
+            // Discover the ephemeral host ports Docker assigned.
+            let addr = data.ports.as_ref().and_then(|ports| {
+                ports.first().and_then(|p| {
+                    Self::host_port_for(&info, *p).map(|hp| format!("localhost:{}", hp))
+                })
+            });
+
+            let originals = info
+                .host_config
+                .as_ref()
+                .map(|hc| OriginalLimits {
+                    memory: hc.memory,
+                    memory_swap: hc.memory_swap,
+                    cpu_period: hc.cpu_period,
+                    cpu_quota: hc.cpu_quota,
+                    blkio_weight: hc.blkio_weight,
+                })
+                .unwrap_or_default();
+            self.original_limits
+                .lock()
+                .expect("poisoned limits lock")
+                .insert(container_id.clone(), originals);
+
+            if let Some(prep) = clock_prep {
+                self.clock.register(container_id.clone(), prep.ctl_path);
+            }
+
+            if let Some(prep) = &storage_prep {
+                self.storage.register(container_id.clone(), &prep.dm_name);
+            }
+
+            Ok((container_id, addr))
+        }
+        .await;
+
+        let (container_id, addr) = match host_result {
+            Ok(v) => v,
+            Err(e) => {
+                if let Some(prep) = &storage_prep {
+                    self.storage.discard(&prep.dm_name);
+                }
+                return Err(e);
+            }
+        };
 
         // Register the host-mapped address so the network proxy can resolve it
         // for link forwarding.
@@ -416,6 +464,7 @@ impl Substrate for Docker {
 
         self.clock.unregister(&id);
         self.network.unregister_subject(&id);
+        self.storage.unregister(&id);
 
         Ok(())
     }

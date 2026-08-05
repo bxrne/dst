@@ -30,6 +30,8 @@ and the substrate.
 | `dstest.inspect`, `dstest.logs`, `dstest.exec` | [`subs/`](subs/README.md) | `inspect`, `logs`, `exec` | flat |
 | `dstest.pg.connect`, `dstest.pg.query`, `dstest.pg.close` | [`pg/`](pg/README.md) | `pg.connect`, `pg.query`, `pg.close` | namespaced |
 | `dstest.clock` | [`clock.rs`](clock.rs) | `clock` | flat |
+| `dstest.storage.*` | [`storage.rs`](storage.rs) | `error`, `drop_writes`, `corrupt`, `snapshot`, `restore` | namespaced |
+| `dstest.random.*` | [`random.rs`](random.rs) | `int`, `float`, `bool`, `choice`, `shuffle` | namespaced |
 | `dstest.debug/info/warn/error` | [`log.rs`](log.rs) | `debug`, `info`, `warn`, `error` | flat |
 
 ## Adding a new binding module

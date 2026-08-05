@@ -28,7 +28,7 @@ local s = dstest.setup(docker_config, { image = "kennethreitz/httpbin", ports = 
 |-------|------|----------|---------|-------------|
 | `name` | string | No | `config_N` | Handle name; must be unique |
 | `substrate` | string | Yes | - | Substrate name; must match the engine's compiled substrate (`"docker"`) |
-| `seed` | number | Yes | - | Random seed for deterministic fault selection (also seeds Lua's `math.random`) |
+| `seed` | number | Yes | - | Random seed for deterministic fault selection (also seeds Lua's `math.random`, network impairments, and storage `corrupt`) |
 | `weights` | table | No | [default weights](../../../DOCS.md#default-weights) | Fault-type weights; normalized to sum to 1.0 |
 | `accumulation` | string | No | `"single"` | `"single"` (clear before each fault) or `"accumulate"` (stack) |
 | `steps` | number | No | `10` | Total fault steps in this config's schedule |
