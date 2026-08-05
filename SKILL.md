@@ -4,7 +4,7 @@ description: Deterministic simulation testing for containerized services. Write 
 license: MIT
 metadata:
   author: bxrne
-  version: "0.2.0"
+  version: "0.1.8"
 ---
 
 # dstest
@@ -73,7 +73,8 @@ local docker_config = dstest.config({
 ## Core API
 
 ```lua
-local s = dstest.setup(docker_config, {
+local cfg = dstest.config({ substrate = "docker", seed = 42 })
+local s = dstest.setup(cfg, {
     image = "kennethreitz/httpbin",
     ports = { 80 },
     volumes = { "/absolute/host/path:/container:ro" },
@@ -82,9 +83,9 @@ local s = dstest.setup(docker_config, {
 })
 
 -- Fault injection (namespaced under dstest.dst)
-local result = dstest.dst.step()        -- Single fault (or step(cfg) with multiple configs)
-local results = dstest.dst.run_steps(5) -- Multiple faults (or run_steps(cfg, 5))
-dstest.dst.clear(s)                     -- Clear active faults
+local result = dstest.dst.step(cfg)        -- Single fault (or step(cfg) with multiple configs)
+local results = dstest.dst.run_steps(cfg, 5) -- Multiple faults
+dstest.dst.clear(s)                        -- Clear active faults
 
 -- HTTP and TCP (namespaced under dstest.net)
 local resp = dstest.net.http(s, "GET", "/get")
@@ -108,7 +109,7 @@ dstest.dst.oracle.predicate("health_check", function(subject, fault, round)
 end)
 
 local report = dstest.dst.oracle.run(function()
-    dstest.dst.run_steps(10)
+    dstest.dst.run_steps(cfg, 10)
 end)
 
 print(report.passed, report.passed_checks, report.failed_checks)
@@ -121,7 +122,7 @@ Full oracle reference: [`src/bindings/dst/README.md`](src/bindings/dst/README.md
 ### Health Check Loop
 ```lua
 while true do
-    local result = dstest.dst.step()
+    local result = dstest.dst.step(cfg)
     if not result.more then break end
 
     if result.fault ~= "pause" and result.fault ~= "kill" then
@@ -137,8 +138,8 @@ end
 
 ### Multi-Service Testing
 ```lua
-local backend = dstest.setup(docker_config, { image = "myapp/backend", ports = { 8080 } })
-local cache = dstest.setup(docker_config, { image = "redis", ports = { 6379 } })
+local backend = dstest.setup(cfg, { image = "myapp/backend", ports = { 8080 } })
+local cache = dstest.setup(cfg, { image = "redis", ports = { 6379 } })
 
 dstest.dst.run_steps(10)
 dstest.dst.clear(backend)

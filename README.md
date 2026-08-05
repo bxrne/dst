@@ -49,6 +49,7 @@ dstest lets you write Lua scripts that define test subjects (Docker containers),
 - `httpbin.lua` - HTTP analysis: status/body assertions, latency timing, fault recovery
 - `pg.lua` - PostgreSQL lifecycle: connect, create table, insert, query, close
 - `oracle.lua` - Fault injection with oracle predicates and invariants
+- `clock.lua` - Virtual clock injection: pin, advance, verify
 
 ## Documentation
 
