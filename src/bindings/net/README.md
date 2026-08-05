@@ -65,10 +65,10 @@ Timeout is `http_timeout` seconds.
 
 ## `dstest.net.link(a, b, port)`
 
-Establishes a controllable link between two subjects and returns a link handle
-for impairing it. This goes through the substrate's `NetworkControl`
-component — substrates without network virtualization (including the Docker
-substrate today) return a "not supported" error.
+Establishes a controllable, proxied link between two subjects and returns a link
+handle for impairing it. The Docker substrate implements this via `tc`/`iptables`
+inside an intermediary proxy container — requires root or `CAP_NET_ADMIN` on the
+host. Substrates without network virtualization return a "not supported" error.
 
 ```lua
 local link = dstest.net.link(subject_a, subject_b, 8080)

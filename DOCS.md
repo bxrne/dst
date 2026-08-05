@@ -85,7 +85,7 @@ local results = dstest.dst.run_steps(10)
 
 Guaranteed reproducible for a given seed:
 
-- the fault schedule (types, targets, order) — weight iteration order is
+- the fault schedule (types, targets, order): weight iteration order is
   sorted, so schedules do not depend on map ordering;
 - Lua's `math.random` (seeded from `seed` via `math.randomseed`).
 

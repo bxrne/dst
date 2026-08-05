@@ -4,7 +4,7 @@ description: Deterministic simulation testing for containerized services. Write 
 license: MIT
 metadata:
   author: bxrne
-  version: "0.1.9"
+  version: "0.1.10"
 ---
 
 # dstest
@@ -34,17 +34,17 @@ cargo install --path .
 
 ## Extra Capabilities
 
-- **Virtual clocks** — pin a subject's `CLOCK_REALTIME` to an epoch and advance
+- **Virtual clocks**: pin a subject's `CLOCK_REALTIME` to an epoch and advance
   it deterministically via `dstest.clock.virtual(s)` (see `dstest.clock` in
   [DOCS.md](DOCS.md)).
-- **Proxied network faults** — `dstest.net.link(a, b, port)` adds latency, loss,
+- **Proxied network faults**: `dstest.net.link(a, b, port)` adds latency, loss,
   and partitions between two subjects (see `dstest.net` in [DOCS.md](DOCS.md)).
-- **Storage faults** — `dstest.storage.*` injects I/O errors, byte corruption,
+- **Storage faults**: `dstest.storage.*` injects I/O errors, byte corruption,
   and snapshot/restore on a `dm-flakey` virtual disk (requires root; see
   `dstest.storage` in [DOCS.md](DOCS.md)).
-- **Seeded workloads** — `dstest.random.*` (int, float, bool, choice, shuffle)
+- **Seeded workloads**: `dstest.random.*` (int, float, bool, choice, shuffle)
   for reproducible non-fault randomness (see `dstest.random` in [DOCS.md](DOCS.md)).
-- **Startup ordering** — `depends = { ... }` in `dstest.setup` waits for
+- **Startup ordering**: `depends = { ... }` in `dstest.setup` waits for
   upstream subjects' ports to accept TCP connections.
 
 For the complete Lua API surface, run `cargo doc --open` (or read [DOCS.md](DOCS.md)).
@@ -108,7 +108,7 @@ dstest.storage.restore(s, snap)   -- roll back
 
 ## Configuration
 
-Call `dstest.config()` first — it returns a **handle** — then pass that handle
+Call `dstest.config()` first: it returns a **handle**: then pass that handle
 as the first argument to `dstest.setup()`. Full field reference:
 [`src/bindings/core/README.md`](src/bindings/core/README.md).
 
@@ -235,7 +235,7 @@ local r1 = dstest.dst.run_steps(cfg1, 5)
 ```
 
 Oracle failures make the process exit with code `2` (script errors `1`,
-infra errors `3`) — CI fails without explicit `error()` calls.
+infra errors `3`): CI fails without explicit `error()` calls.
 
 ## Logging
 

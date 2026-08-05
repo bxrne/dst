@@ -42,7 +42,7 @@ cargo run
 
 ## Overview
 
-dstest lets you write Lua scripts that define test subjects (Docker containers), inject faults (pause, kill, resource deprivation, proxied network impairments, virtual disk faults), and verify service resilience — including virtual clocks for time-dependent logic, seeded workload randomness, and `depends` for multi-service startup ordering. All experiments are deterministic when seeded, making them reproducible across runs.
+dstest lets you write Lua scripts that define test subjects (Docker containers), inject faults (pause, kill, resource deprivation, proxied network impairments, virtual disk faults), and verify service resilience: including virtual clocks for time-dependent logic, seeded workload randomness, and `depends` for multi-service startup ordering. All experiments are deterministic when seeded, making them reproducible across runs.
 
 ## Examples
 
