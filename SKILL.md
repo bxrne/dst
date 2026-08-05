@@ -4,7 +4,7 @@ description: Deterministic simulation testing for containerized services. Write 
 license: MIT
 metadata:
   author: bxrne
-  version: "0.1.8"
+  version: "0.1.9"
 ---
 
 # dstest

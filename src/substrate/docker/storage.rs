@@ -240,12 +240,13 @@ impl DockerStorage {
         let _ = run_cmd("umount", &[&host_mount.display().to_string()]);
         let _ = run_cmd("dmsetup", &["remove", "--force", dm_name]);
         // Detach any loop device still pointing at this backing file.
-        if backing_file.exists() {
-            if let Ok(out) = run_cmd("losetup", &["-j", &backing_file.display().to_string()]) {
-                for line in out.lines() {
-                    if let Some(dev) = line.split(':').next() {
-                        let _ = run_cmd("losetup", &["-d", dev.trim()]);
-                    }
+        if backing_file.exists()
+            && let Ok(out) =
+                run_cmd("losetup", &["-j", &backing_file.display().to_string()])
+        {
+            for line in out.lines() {
+                if let Some(dev) = line.split(':').next() {
+                    let _ = run_cmd("losetup", &["-d", dev.trim()]);
                 }
             }
         }
@@ -258,15 +259,15 @@ impl DockerStorage {
         let _ = run_cmd("dmsetup", &["remove", "--force", &state.dm_name]);
         let _ = run_cmd("losetup", &["-d", &state.loop_dev]);
         // Snapshots live next to the backing file.
-        if let Some(parent) = state.backing_file.parent() {
-            if let Ok(entries) = fs::read_dir(parent) {
-                let prefix = format!("{}.", state.dm_name);
-                for entry in entries.flatten() {
-                    let name = entry.file_name();
-                    let name = name.to_string_lossy();
-                    if name.starts_with(&prefix) && name.ends_with(".snap") {
-                        let _ = fs::remove_file(entry.path());
-                    }
+        if let Some(parent) = state.backing_file.parent()
+            && let Ok(entries) = fs::read_dir(parent)
+        {
+            let prefix = format!("{}.", state.dm_name);
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with(&prefix) && name.ends_with(".snap") {
+                    let _ = fs::remove_file(entry.path());
                 }
             }
         }
