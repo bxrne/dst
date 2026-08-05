@@ -19,24 +19,22 @@ use bollard::query_parameters::{
 use futures_util::TryStreamExt;
 use tracing::{debug, info, warn};
 
-use crate::components::{NopNetwork, NopStorage};
+use crate::components::NopStorage;
 use crate::substrate::{
     ExecResult, Fault, HostedSubject, LogEntry, Stream, Subject, Substrate, ToLua,
 };
 
 pub mod clock;
+pub mod network;
 
 use clock::{ClockSpec, DockerClock};
+use network::DockerNetwork;
 
 pub struct Docker {
     connection: BollardDocker,
-    /// Resource limits captured at `host()` time, keyed by container id, so
-    /// `clear_faults` can restore them explicitly (Docker's update API
-    /// treats absent fields as "no change", so clearing requires writing
-    /// values back).
     original_limits: Mutex<HashMap<String, OriginalLimits>>,
     clock: DockerClock,
-    network: NopNetwork,
+    network: DockerNetwork,
     storage: NopStorage,
 }
 
@@ -56,9 +54,9 @@ impl Docker {
             .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
         Ok(Self {
             clock: DockerClock::new(connection.clone()),
+            network: DockerNetwork::new(connection.clone()),
             connection,
             original_limits: Mutex::new(HashMap::new()),
-            network: NopNetwork,
             storage: NopStorage,
         })
     }
@@ -149,6 +147,7 @@ pub struct DockerSubjectData {
     pub volumes: Option<Vec<String>>,
     pub env: Option<Vec<String>>,
     pub clock: Option<ClockSpec>,
+    pub network_proxied: bool,
 }
 
 impl Substrate for Docker {
@@ -158,7 +157,7 @@ impl Substrate for Docker {
     type Inspect = DockerInspect;
     type LogOpts = DockerLogOpts;
     type Clock = DockerClock;
-    type Network = NopNetwork;
+    type Network = DockerNetwork;
     type Storage = NopStorage;
 
     fn parse_subject(&self, table: &mlua::Table) -> Result<Self::SubjectData, String> {
@@ -179,6 +178,13 @@ impl Substrate for Docker {
             _ => None,
         };
 
+        // Optional proxied networking: network = { proxied = true }
+        let network_proxied = table
+            .get::<mlua::Table>("network")
+            .ok()
+            .and_then(|t| t.get::<bool>("proxied").ok())
+            .unwrap_or(false);
+
         Ok(DockerSubjectData {
             image,
             cmd,
@@ -186,6 +192,7 @@ impl Substrate for Docker {
             volumes,
             env,
             clock,
+            network_proxied,
         })
     }
 
@@ -248,6 +255,13 @@ impl Substrate for Docker {
                     map
                 }),
                 binds: if binds.is_empty() { None } else { Some(binds) },
+                // Proxied subjects get host.docker.internal so they can dial
+                // proxy listeners on the host.
+                extra_hosts: if data.network_proxied {
+                    Some(vec!["host.docker.internal:host-gateway".to_string()])
+                } else {
+                    None
+                },
                 ..Default::default()
             }),
             env: if env.is_empty() { None } else { Some(env) },
@@ -312,6 +326,13 @@ impl Substrate for Docker {
 
         if let Some(prep) = clock_prep {
             self.clock.register(container_id.clone(), prep.ctl_path);
+        }
+
+        // Register the host-mapped address so the network proxy can resolve it
+        // for link forwarding.
+        if let Some(ref addr) = addr {
+            self.network
+                .register_host(container_id.clone(), addr.clone());
         }
 
         info!("Started container name={} id={}", name, container_id);
@@ -394,6 +415,7 @@ impl Substrate for Docker {
             .remove(&id);
 
         self.clock.unregister(&id);
+        self.network.unregister_subject(&id);
 
         Ok(())
     }

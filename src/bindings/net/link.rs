@@ -19,6 +19,18 @@ struct Link<S: Substrate> {
 
 impl<S: Substrate> UserData for Link<S> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_async_method("addr", |_, this, ()| {
+            let substrate = Arc::clone(&this.substrate);
+            let id = this.id.clone();
+            async move {
+                substrate
+                    .network()
+                    .link_addr(&id)
+                    .await
+                    .map_err(mlua::Error::RuntimeError)
+            }
+        });
+
         methods.add_async_method("latency", |_, this, (delay_ms, jitter_ms): (u64, u64)| {
             let substrate = Arc::clone(&this.substrate);
             let id = this.id.clone();

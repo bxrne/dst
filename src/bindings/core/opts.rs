@@ -2,14 +2,18 @@ use std::sync::Arc;
 
 use mlua::{Lua, Result, Table};
 
+use crate::components::NetworkControl;
 use crate::config::Config;
 use crate::engine::context::BindingContext;
 use crate::substrate::Substrate;
 
 pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let state = Arc::clone(&ctx.state);
+    let substrate = Arc::clone(&ctx.substrate);
 
     let config_fn = lua.create_function(move |lua, tbl: Table| {
+        let state = Arc::clone(&state);
+        let substrate = Arc::clone(&substrate);
         let mut cfg = Config::default();
 
         let name: Option<String> = tbl.get("name").ok();
@@ -25,6 +29,8 @@ pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>
             let math: Table = globals.get("math")?;
             let randomseed: mlua::Function = math.get("randomseed")?;
             randomseed.call::<()>(seed)?;
+            // Seed the network impairment RNG.
+            substrate.network().set_seed(seed);
         }
 
         if let Ok(weights) = tbl.get::<Table>("weights") {

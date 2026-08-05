@@ -15,5 +15,5 @@ pub mod storage;
 
 pub use clock::{ClockControl, ClockState};
 pub use network::{Direction, LinkId, NetworkControl, PartitionMode};
-pub use nop::{NopNetwork, NopStorage};
+pub use nop::NopStorage;
 pub use storage::{StorageControl, StorageOpts};

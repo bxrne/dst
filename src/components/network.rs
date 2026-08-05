@@ -67,10 +67,22 @@ impl std::str::FromStr for PartitionMode {
 /// Per-link network impairment control. Implementations must be
 /// deterministic given the experiment seed.
 pub trait NetworkControl: Send + Sync + 'static {
+    /// Set the root seed for impairment randomness (jitter, loss sampling).
+    /// Called by the engine when a config with a seed is registered. The
+    /// default is a no-op; substrates that support network control should
+    /// store it and derive per-link seeds from it.
+    fn set_seed(&self, _seed: u64) {}
+
     /// Establish a controllable link from subject `a` to subject `b` on the
-    /// given service port. Returns the link identifier and (out-of-band, via
-    /// the substrate) the address `a` should dial to reach `b` over this link.
+    /// given service port. Returns the link identifier.
     async fn link(&self, _a: &Subject, _b: &Subject, _port: u16) -> Result<LinkId, String> {
+        Err(NOT_SUPPORTED.to_string())
+    }
+
+    /// The address subject `a` should dial to reach `b` over this link
+    /// (e.g. `"host.docker.internal:32768"`). Substrates without network
+    /// control return an error.
+    async fn link_addr(&self, _link: &LinkId) -> Result<String, String> {
         Err(NOT_SUPPORTED.to_string())
     }
 
