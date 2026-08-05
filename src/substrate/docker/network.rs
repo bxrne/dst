@@ -40,6 +40,12 @@ struct LinkInner {
     container_name: String,
     /// Bridge IP of the proxy container (the address the source dials).
     addr: String,
+    /// Current netem delay (ms), if any.
+    delay_ms: Option<u64>,
+    /// Current netem jitter (ms), if any.
+    jitter_ms: Option<u64>,
+    /// Current netem loss fraction (0.0–1.0), if any.
+    loss_pct: Option<f64>,
 }
 
 pub struct DockerNetwork {
@@ -181,6 +187,51 @@ impl DockerNetwork {
         }
         Ok(())
     }
+
+    /// Apply the current netem settings stored on a link.
+    async fn apply_netem(&self, link: &LinkId) -> Result<(), String> {
+        let (container_name, delay_ms, jitter_ms, loss_pct) = {
+            let links = self.links.lock().expect("poisoned links lock");
+            let inner = links
+                .get(link)
+                .ok_or_else(|| format!("unknown link {}", link.0))?;
+            (
+                inner.container_name.clone(),
+                inner.delay_ms,
+                inner.jitter_ms,
+                inner.loss_pct,
+            )
+        };
+
+        let mut cmd: Vec<&str> = vec!["tc", "qdisc", "replace", "dev", "eth0", "root", "netem"];
+        let delay_arg;
+        let jitter_arg;
+        let loss_arg;
+
+        if let Some(delay) = delay_ms {
+            delay_arg = format!("{}ms", delay);
+            cmd.push("delay");
+            cmd.push(&delay_arg);
+            if let Some(jitter) = jitter_ms.filter(|&j| j > 0) {
+                jitter_arg = format!("{}ms", jitter);
+                cmd.push(&jitter_arg);
+            }
+        }
+
+        if let Some(pct) = loss_pct {
+            loss_arg = format!("{}%", (pct * 100.0) as u32);
+            cmd.push("loss");
+            cmd.push(&loss_arg);
+        }
+
+        if delay_ms.is_none() && loss_pct.is_none() {
+            return Ok(());
+        }
+
+        self.exec_in_proxy(&container_name, &cmd).await?;
+        debug!("link {} netem: {:?}", link.0, cmd);
+        Ok(())
+    }
 }
 
 impl NetworkControl for DockerNetwork {
@@ -276,6 +327,9 @@ impl NetworkControl for DockerNetwork {
             LinkInner {
                 container_name,
                 addr,
+                delay_ms: None,
+                jitter_ms: None,
+                loss_pct: None,
             },
         );
 
@@ -296,54 +350,29 @@ impl NetworkControl for DockerNetwork {
         delay_ms: u64,
         jitter_ms: u64,
     ) -> Result<(), String> {
-        let container_name = {
-            let links = self.links.lock().expect("poisoned links lock");
-            links
-                .get(link)
-                .ok_or_else(|| format!("unknown link {}", link.0))?
-                .container_name
-                .clone()
-        };
-
-        let spec = if jitter_ms > 0 {
-            format!("delay {}ms {}ms", delay_ms, jitter_ms)
-        } else {
-            format!("delay {}ms", delay_ms)
-        };
-        self.exec_in_proxy(
-            &container_name,
-            &[
-                "tc", "qdisc", "replace", "dev", "eth0", "root", "netem", &spec,
-            ],
-        )
-        .await?;
-        debug!("link {} latency: {}", link.0, spec);
-        Ok(())
+        {
+            let mut links = self.links.lock().expect("poisoned links lock");
+            let inner = links
+                .get_mut(link)
+                .ok_or_else(|| format!("unknown link {}", link.0))?;
+            inner.delay_ms = Some(delay_ms);
+            inner.jitter_ms = if jitter_ms > 0 { Some(jitter_ms) } else { None };
+        }
+        self.apply_netem(link).await
     }
 
     async fn set_loss(&self, link: &LinkId, pct: f64) -> Result<(), String> {
         if !(0.0..=1.0).contains(&pct) {
             return Err(format!("loss must be 0.0–1.0, got {}", pct));
         }
-        let container_name = {
-            let links = self.links.lock().expect("poisoned links lock");
-            links
-                .get(link)
-                .ok_or_else(|| format!("unknown link {}", link.0))?
-                .container_name
-                .clone()
-        };
-
-        let pct_str = format!("{}%", (pct * 100.0) as u32);
-        self.exec_in_proxy(
-            &container_name,
-            &[
-                "tc", "qdisc", "replace", "dev", "eth0", "root", "netem", "loss", &pct_str,
-            ],
-        )
-        .await?;
-        debug!("link {} loss: {}", link.0, pct_str);
-        Ok(())
+        {
+            let mut links = self.links.lock().expect("poisoned links lock");
+            let inner = links
+                .get_mut(link)
+                .ok_or_else(|| format!("unknown link {}", link.0))?;
+            inner.loss_pct = Some(pct);
+        }
+        self.apply_netem(link).await
     }
 
     async fn partition(
@@ -423,13 +452,22 @@ impl NetworkControl for DockerNetwork {
         .await
         .ok();
 
-        // Remove tc qdisc (latency) — errors if absent.
+        // Remove tc qdisc (latency/loss) — errors if absent.
         self.exec_in_proxy(
             &container_name,
             &["tc", "qdisc", "del", "dev", "eth0", "root"],
         )
         .await
         .ok();
+
+        {
+            let mut links = self.links.lock().expect("poisoned links lock");
+            if let Some(inner) = links.get_mut(link) {
+                inner.delay_ms = None;
+                inner.jitter_ms = None;
+                inner.loss_pct = None;
+            }
+        }
 
         info!("link {} healed", link.0);
         Ok(())

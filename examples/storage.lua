@@ -2,6 +2,13 @@
 --- Virtual disk faults via dm-flakey: errors, corruption, snapshot/restore.
 --- Requires root on the host (loop devices + device-mapper).
 --- Run: cat examples/storage.lua | cargo run
+---      (or: sudo -E bash -c 'cat examples/storage.lua | cargo run')
+
+-- Preflight: flaky storage needs loop devices, which require root.
+if not os.execute("losetup -f >/dev/null 2>&1") then
+    dstest.info("skipping storage example: losetup unavailable (need root)")
+    return
+end
 
 local cfg = dstest.config({
     substrate = "docker",

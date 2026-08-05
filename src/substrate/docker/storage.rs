@@ -241,8 +241,7 @@ impl DockerStorage {
         let _ = run_cmd("dmsetup", &["remove", "--force", dm_name]);
         // Detach any loop device still pointing at this backing file.
         if backing_file.exists()
-            && let Ok(out) =
-                run_cmd("losetup", &["-j", &backing_file.display().to_string()])
+            && let Ok(out) = run_cmd("losetup", &["-j", &backing_file.display().to_string()])
         {
             for line in out.lines() {
                 if let Some(dev) = line.split(':').next() {

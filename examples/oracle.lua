@@ -1,6 +1,9 @@
 --- @diagnostic disable:undefined-global
 --- Oracle-driven chaos experiment: predicates + invariants during fault injection.
 --- Run: cat examples/oracle.lua | cargo run
+---
+--- Expect exit code 2 when oracle checks fail — that is intentional. The
+--- example demonstrates reporting during chaos, not a green integration test.
 
 local docker_config = dstest.config({
 	substrate = "docker",
