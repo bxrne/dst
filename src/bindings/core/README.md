@@ -64,7 +64,7 @@ local subject = dstest.setup(docker_config, {
 | `volumes` | table | No | Array of bind mounts (`host:container[:options]`). Host path must be absolute. |
 | `env` | table | No | Key-value table of environment variables |
 | `cmd` | table | No | Array of command arguments overriding the entrypoint |
-| `depends` | table | No | Array of subject IDs to wait for (TCP-ready on their exposed port) before creating this subject |
+| `depends` | table | No | Array of subject IDs to wait for (substrate-reported running state) before creating this subject |
 
 ### `depends`
 
@@ -73,15 +73,16 @@ local db = dstest.setup(cfg, { image = "postgres:16-alpine", ports = { 5432 } })
 local app = dstest.setup(cfg, {
     image = "myapp",
     ports = { 8080 },
-    depends = { db },   -- blocks until db's port 5432 accepts connections
+    depends = { db },   -- blocks until db's container state is "running"
 })
 ```
 
 Each entry is a subject ID (the string returned by a prior `dstest.setup`).
-Before pulling/creating/starting the dependent subject, `setup` polls each
-dependency's exposed port with a 500ms interval until it accepts a TCP
-connection (max 60s). Dependencies without a port (no `ports` field) are
-skipped — the subject is assumed ready once it's running.
+Before pulling/creating/starting the dependent subject, `setup` polls the
+dependency's status via the substrate (e.g. Docker container state) with a
+500ms interval until it reports `running` (max 60s). If the dependency
+terminates before becoming ready, setup errors immediately rather than
+polling to timeout.
 
 ### Virtual clock
 

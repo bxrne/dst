@@ -16,7 +16,7 @@ From crates.io:
 cargo install dstest
 
 # Run a script file
-dstest < examples/httpbin.lua
+dstest < examples/oracle.lua
 
 # Or use REPL mode: type your script interactively, press Ctrl+D to execute
 dstest
@@ -34,7 +34,7 @@ cargo build --release
 
 ```bash
 # Run a script file
-cat examples/httpbin.lua | cargo run
+cat examples/oracle.lua | cargo run
 
 # Or use REPL mode: type your script and press Ctrl+D to run it
 cargo run
@@ -46,12 +46,9 @@ dstest lets you write Lua scripts that define test subjects (Docker containers),
 
 ## Examples
 
-- `httpbin.lua` - HTTP analysis: GET/POST, status/body assertions, latency, fault recovery
-- `pg.lua` - PostgreSQL: connect, create table, insert, query, close
 - `oracle.lua` - Fault injection with oracle predicates and invariants
-- `clock.lua` - Virtual clock: pin, advance, verify subject time
-- `storage.lua` - dm-flakey disk faults: errors, corruption, snapshot/restore
 - `link.lua` - Proxied network faults: latency, loss, partitions between subjects
+- `pg.lua` - PostgreSQL: connect, create table, insert, query, close
 
 ## Documentation
 

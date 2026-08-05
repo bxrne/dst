@@ -15,7 +15,7 @@ dstest is a deterministic chaos testing framework for Docker containers. Write L
 
 ```bash
 # Run an example
-cat examples/httpbin.lua | cargo run
+cat examples/oracle.lua | cargo run
 
 # Build and install
 cargo build --release
@@ -39,13 +39,10 @@ cargo install --path .
   [DOCS.md](DOCS.md)).
 - **Proxied network faults**: `dstest.net.link(a, b, port)` adds latency, loss,
   and partitions between two subjects (see `dstest.net` in [DOCS.md](DOCS.md)).
-- **Storage faults**: `dstest.storage.*` injects I/O errors, byte corruption,
-  and snapshot/restore on a `dm-flakey` virtual disk (requires root; see
-  `dstest.storage` in [DOCS.md](DOCS.md)).
 - **Seeded workloads**: `dstest.random.*` (int, float, bool, choice, shuffle)
   for reproducible non-fault randomness (see `dstest.random` in [DOCS.md](DOCS.md)).
 - **Startup ordering**: `depends = { ... }` in `dstest.setup` waits for
-  upstream subjects' ports to accept TCP connections.
+  upstream subjects to reach a running state as reported by the substrate.
 
 For the complete Lua API surface, run `cargo doc --open` (or read [DOCS.md](DOCS.md)).
 
@@ -83,28 +80,7 @@ link:heal()
 
 ### Storage Faults (`dstest.storage.*`)
 
-Inject disk-level faults onto a `dm-flakey` virtual disk. Opt in at subject
-creation (requires root on the host):
-
-```lua
-local s = dstest.setup(cfg, {
-    image = "alpine:3.20",
-    storage = { flaky = true, mount = "/data", size_mb = 64 },
-})
-
-dstest.storage.error(s, true)     -- EIO on all I/O
-dstest.storage.corrupt(s, 10)     -- flip 10 seeded bytes
-local snap = dstest.storage.snapshot(s)
-dstest.storage.restore(s, snap)   -- roll back
-```
-
-| Method | Description |
-|--------|-------------|
-| `dstest.storage.error(id, on)` | Toggle EIO on all I/O |
-| `dstest.storage.drop_writes(id, on)` | ACK writes but discard them |
-| `dstest.storage.corrupt(id, n)` | Flip `n` deterministic bytes |
-| `dstest.storage.snapshot(id)` | Snapshot and return an ID |
-| `dstest.storage.restore(id, snap)` | Restore a snapshot |
+> **Removed:** the `dm-flakey` storage backend required root privileges and has been removed. Storage fault injection may return in a future unprivileged implementation (e.g. FUSE-based).
 
 ## Configuration
 
@@ -142,9 +118,7 @@ local s = dstest.setup(cfg, {
     volumes = { "/absolute/host/path:/container:ro" },
     env = { DEBUG = "true" },
     cmd = { "python", "-m", "httpbin" },
-    depends = { other_subject },  -- Wait for another subject's port to accept TCP
-    clock = { virtual = true, start_epoch = 1600000000 },  -- opt into virtual clock
-    storage = { flaky = true, mount = "/data", size_mb = 64 },  -- virtual disk faults
+    depends = { other_subject },  -- Wait for another subject to reach running state
 })
 
 -- Fault injection (namespaced under dstest.dst)
@@ -214,7 +188,7 @@ local backend = dstest.setup(cfg, { image = "myapp/backend", ports = { 8080 } })
 local cache = dstest.setup(cfg, {
     image = "redis",
     ports = { 6379 },
-    depends = { backend },  -- wait for backend's port to accept TCP
+    depends = { backend },  -- wait for backend to be running
 })
 
 dstest.dst.run_steps(cfg, 10)
@@ -250,12 +224,9 @@ dstest.error("failure occurred")
 
 | File | Demonstrates |
 |------|--------------|
-| [`examples/httpbin.lua`](examples/httpbin.lua) | HTTP analysis: GET/POST, status/body assertions, latency |
-| [`examples/pg.lua`](examples/pg.lua) | PostgreSQL: connect, create table, insert, query, close |
 | [`examples/oracle.lua`](examples/oracle.lua) | Fault injection with oracle predicates and invariants |
-| [`examples/clock.lua`](examples/clock.lua) | Virtual clock: pin, advance, verify subject time |
-| [`examples/storage.lua`](examples/storage.lua) | dm-flakey disk faults: errors, corruption, snapshot/restore |
 | [`examples/link.lua`](examples/link.lua) | Proxied network faults: latency, loss, partitions between subjects |
+| [`examples/pg.lua`](examples/pg.lua) | PostgreSQL: connect, create table, insert, query, close |
 
 ## Writing Scripts
 

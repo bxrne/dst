@@ -48,6 +48,17 @@ pub struct ExecResult {
     pub stderr: String,
 }
 
+/// Substrate-agnostic liveness status used for dependency readiness waits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubjectStatus {
+    /// Subject is up and running.
+    Running,
+    /// Subject exists but is not currently running (paused, starting, …).
+    Pending,
+    /// Subject has terminated — waiting is pointless.
+    Terminated,
+}
+
 /// The result of hosting a subject: its instance id and an optional
 /// reachable address (e.g. `"localhost:8080"`). Each substrate decides
 /// what address format makes sense — Docker returns a host port mapping,
@@ -120,6 +131,7 @@ pub trait Substrate: Send + Sync + 'static {
     async fn logs(&self, subject: &Subject, opts: Self::LogOpts) -> Result<Vec<LogEntry>, String>;
     async fn inspect(&self, subject: &Subject) -> Result<Self::Inspect, String>;
     async fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String>;
+    async fn status(&self, subject: &Subject) -> Result<SubjectStatus, String>;
 
     fn clock(&self) -> &Self::Clock;
     fn network(&self) -> &Self::Network;

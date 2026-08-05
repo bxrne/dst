@@ -30,7 +30,6 @@ others are namespaced under sub-tables.
 | `dstest.inspect`, `dstest.logs`, `dstest.exec` | container introspection | [`src/bindings/subs/README.md`](src/bindings/subs/README.md) |
 | `dstest.pg.connect`, `dstest.pg.query`, `dstest.pg.close` | PostgreSQL | [`src/bindings/pg/README.md`](src/bindings/pg/README.md) |
 | `dstest.clock`, `dstest.clock.now`, `dstest.clock.virtual` | timestamps, virtual clocks | [`src/bindings/clock/README.md`](src/bindings/clock/README.md) |
-| `dstest.storage.*` | virtual disk faults | [`src/bindings/storage/README.md`](src/bindings/storage/README.md) |
 | `dstest.random.*` | seeded reproducible randomness | [`src/bindings/random/README.md`](src/bindings/random/README.md) |
 | `dstest.debug`, `dstest.info`, `dstest.warn`, `dstest.error` | logging | [`src/bindings/log/README.md`](src/bindings/log/README.md) |
 
@@ -40,7 +39,9 @@ others are namespaced under sub-tables.
 `dstest.setup(handle, {...})` creates a subject linked to that config (and its
 substrate). Multiple configs can coexist; `dstest.dst.step()` /
 `dstest.dst.run_steps()` accept an optional config handle when more than one is
-registered.
+registered. `dstest.setup`'s `depends` field waits for upstream subjects to
+reach a running state (reported by the substrate) before creating the dependent
+subject.
 
 ## Default Weights
 
@@ -106,7 +107,6 @@ container-image drift (pin images by digest to avoid it).
 
 | File | Demonstrates |
 |------|--------------|
-| [`examples/httpbin.lua`](examples/httpbin.lua) | HTTP analysis: GET/POST, status/body assertions, latency |
-| [`examples/pg.lua`](examples/pg.lua) | PostgreSQL: connect, create table, insert, query, close |
 | [`examples/oracle.lua`](examples/oracle.lua) | Fault injection with oracle predicates and invariants |
-| [`examples/clock.lua`](examples/clock.lua) | Virtual clock injection: pin, advance, verify |
+| [`examples/link.lua`](examples/link.lua) | Proxied network faults: latency, loss, partitions between subjects |
+| [`examples/pg.lua`](examples/pg.lua) | PostgreSQL: connect, create table, insert, query, close |

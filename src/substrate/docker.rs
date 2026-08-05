@@ -20,7 +20,7 @@ use futures_util::TryStreamExt;
 use tracing::{debug, info, warn};
 
 use crate::substrate::{
-    ExecResult, Fault, HostedSubject, LogEntry, Stream, Subject, Substrate, ToLua,
+    ExecResult, Fault, HostedSubject, LogEntry, Stream, Subject, SubjectStatus, Substrate, ToLua,
 };
 
 pub mod clock;
@@ -612,6 +612,28 @@ impl Substrate for Docker {
             stdout,
             stderr,
         })
+    }
+
+    async fn status(&self, subject: &Subject) -> Result<SubjectStatus, String> {
+        let id = Self::container_id(subject).to_string();
+
+        let info = self
+            .connection
+            .inspect_container(&id, None::<InspectContainerOptions>)
+            .await
+            .map_err(|e| format!("Inspect failed for status: {}", e))?;
+
+        let state = info.state.and_then(|s| s.status);
+        match state {
+            Some(ContainerStateStatusEnum::RUNNING) => Ok(SubjectStatus::Running),
+            Some(ContainerStateStatusEnum::PAUSED) => Ok(SubjectStatus::Pending),
+            Some(ContainerStateStatusEnum::CREATED) => Ok(SubjectStatus::Pending),
+            Some(ContainerStateStatusEnum::RESTARTING) => Ok(SubjectStatus::Pending),
+            Some(ContainerStateStatusEnum::REMOVING) => Ok(SubjectStatus::Pending),
+            Some(ContainerStateStatusEnum::EXITED) => Ok(SubjectStatus::Terminated),
+            Some(ContainerStateStatusEnum::DEAD) => Ok(SubjectStatus::Terminated),
+            _ => Ok(SubjectStatus::Terminated),
+        }
     }
 
     fn clock(&self) -> &Self::Clock {

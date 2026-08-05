@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::engine::context::BindingContext;
 use crate::engine::state::SubjectRecord;
-use crate::substrate::Substrate;
+use crate::substrate::{Subject, SubjectStatus, Substrate};
 
 /// Default time to wait for a dependency to become ready (60 × 500ms = 30s).
 const DEP_WAIT_ATTEMPTS: usize = 120;
@@ -67,34 +67,37 @@ pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>
                 // Wait for dependencies to be ready before hosting.
                 let depends: Vec<String> = config_tbl.get("depends").unwrap_or_default();
                 for dep_id in &depends {
-                    let dep_addr = {
-                        let state = state.lock().expect("poisoned engine state lock");
-                        state.subject_hosts.get(dep_id).cloned()
-                    };
-                    if let Some(addr) = dep_addr {
-                        let mut ready = false;
-                        for _attempt in 0..DEP_WAIT_ATTEMPTS {
-                            if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+                    let dep_subject = Subject::new(dep_id.clone());
+                    let mut ready = false;
+                    for _attempt in 0..DEP_WAIT_ATTEMPTS {
+                        match substrate.status(&dep_subject).await {
+                            Ok(SubjectStatus::Running) => {
                                 ready = true;
                                 break;
                             }
-                            tokio::time::sleep(DEP_WAIT_INTERVAL).await;
+                            Ok(SubjectStatus::Terminated) => {
+                                return Err(mlua::Error::RuntimeError(format!(
+                                    "dependency {} has terminated",
+                                    dep_id
+                                )));
+                            }
+                            Ok(SubjectStatus::Pending) => {
+                                tokio::time::sleep(DEP_WAIT_INTERVAL).await;
+                            }
+                            Err(e) => {
+                                debug!("dependency {} status check: {}", dep_id, e);
+                                tokio::time::sleep(DEP_WAIT_INTERVAL).await;
+                            }
                         }
-                        if !ready {
-                            return Err(mlua::Error::RuntimeError(format!(
-                                "dependency {} not ready after {}s (polling {})",
-                                dep_id,
-                                DEP_WAIT_ATTEMPTS * DEP_WAIT_INTERVAL.as_millis() as usize / 1000,
-                                addr
-                            )));
-                        }
-                        debug!("dependency {} ready at {}", dep_id, addr);
-                    } else {
-                        debug!(
-                            "dependency {} has no address; skipping readiness wait",
-                            dep_id
-                        );
                     }
+                    if !ready {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "dependency {} not ready after {}s",
+                            dep_id,
+                            DEP_WAIT_ATTEMPTS * DEP_WAIT_INTERVAL.as_millis() as usize / 1000,
+                        )));
+                    }
+                    debug!("dependency {} ready", dep_id);
                 }
 
                 let data = substrate
