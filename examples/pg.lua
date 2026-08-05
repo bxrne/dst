@@ -2,12 +2,12 @@
 --- PostgreSQL lifecycle: connect, create table, insert, query, close.
 --- Run: cat examples/pg.lua | cargo run
 
-dstest.config({
+local docker_config = dstest.config({
     substrate = "docker",
     seed = 42,
 })
 
-local s = dstest.setup({
+local s = dstest.setup(docker_config, {
     image = "postgres:16-alpine",
     ports = { 5432 },
     env = {

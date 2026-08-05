@@ -45,11 +45,12 @@ cargo install --path .
 
 ## Configuration
 
-Call `dstest.config()` first, then `dstest.setup()`. Full field reference:
+Call `dstest.config()` first — it returns a **handle** — then pass that handle
+as the first argument to `dstest.setup()`. Full field reference:
 [`src/bindings/core/README.md`](src/bindings/core/README.md).
 
 ```lua
-dstest.config({
+local docker_config = dstest.config({
     substrate = "docker",      -- Required: must match the engine's compiled substrate
     seed = 42,                 -- Required: random seed for determinism
     weights = {                -- Optional: fault weights (defaults below)
@@ -61,6 +62,7 @@ dstest.config({
         ["deprive:cpu"] = 0.10,
     },
     accumulation = "single",   -- "single" (default) or "accumulate"
+    steps = 10,                -- Total fault steps in the schedule
     http_timeout = 5,          -- HTTP timeout in seconds
     http_retries = 30,         -- HTTP retry attempts
     http_retry_delay = 500,    -- Delay between retries (ms)
@@ -71,7 +73,7 @@ dstest.config({
 ## Core API
 
 ```lua
-local s = dstest.setup({
+local s = dstest.setup(docker_config, {
     image = "kennethreitz/httpbin",
     ports = { 80 },
     volumes = { "/absolute/host/path:/container:ro" },
@@ -80,8 +82,8 @@ local s = dstest.setup({
 })
 
 -- Fault injection (namespaced under dstest.dst)
-local result = dstest.dst.step()        -- Single fault
-local results = dstest.dst.run_steps(5) -- Multiple faults
+local result = dstest.dst.step()        -- Single fault (or step(cfg) with multiple configs)
+local results = dstest.dst.run_steps(5) -- Multiple faults (or run_steps(cfg, 5))
 dstest.dst.clear(s)                     -- Clear active faults
 
 -- HTTP and TCP (namespaced under dstest.net)
@@ -135,8 +137,8 @@ end
 
 ### Multi-Service Testing
 ```lua
-local backend = dstest.setup({ image = "myapp/backend", ports = { 8080 } })
-local cache = dstest.setup({ image = "redis", ports = { 6379 } })
+local backend = dstest.setup(docker_config, { image = "myapp/backend", ports = { 8080 } })
+local cache = dstest.setup(docker_config, { image = "redis", ports = { 6379 } })
 
 dstest.dst.run_steps(10)
 dstest.dst.clear(backend)
@@ -145,17 +147,18 @@ dstest.dst.clear(cache)
 
 ## Determinism
 
-Same seed = identical fault sequence:
+Same seed = identical fault sequence. Register two configs with the same seed
+and both produce the same schedule for their subjects:
 
 ```lua
-dstest.config({ seed = 42 })
-local r1 = dstest.dst.run_steps(5)
-
-dstest.config({ seed = 42 })
-local r2 = dstest.dst.run_steps(5)
-
--- r1 and r2 have identical faults in identical order
+local cfg1 = dstest.config({ substrate = "docker", seed = 42 })
+local s1 = dstest.setup(cfg1, { image = "kennethreitz/httpbin", ports = { 80 } })
+local r1 = dstest.dst.run_steps(cfg1, 5)
+-- re-running the whole script with seed 42 yields the identical schedule
 ```
+
+Oracle failures make the process exit with code `2` (script errors `1`,
+infra errors `3`) — CI fails without explicit `error()` calls.
 
 ## Logging
 

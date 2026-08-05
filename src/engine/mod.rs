@@ -1,5 +1,5 @@
 use crate::bindings::register_all;
-use crate::substrate::Substrate;
+use crate::substrate::{Subject, Substrate};
 use tracing::{debug, warn};
 
 pub mod context;
@@ -41,22 +41,71 @@ impl<S: Substrate> Engine<S> {
     pub async fn execute(&self, script: &str) -> mlua::Result<()> {
         self.ctx.lua.load(script).call_async::<()>(()).await
     }
+
+    /// Tear down every live subject, awaiting each. Call this while a tokio
+    /// runtime is still alive; `Drop` remains as a last-resort fallback.
+    pub async fn shutdown(&self) {
+        let records: Vec<(String, String)> = {
+            let mut state = self.ctx.state.lock().expect("poisoned engine state lock");
+            state.subjects.drain(..).map(|r| (r.id, r.name)).collect()
+        };
+
+        for (id, name) in records {
+            if let Err(e) = self.ctx.substrate.teardown(Subject::new(id.clone())).await {
+                warn!("teardown failed for subject {} ({}): {}", name, id, e);
+            } else {
+                debug!("teardown complete for subject {} ({})", name, id);
+            }
+        }
+    }
+
+    /// Final oracle report for the run (used for the process exit code).
+    pub fn oracle_report(&self) -> crate::oracle::OracleReport {
+        self.ctx
+            .oracle
+            .lock()
+            .expect("poisoned oracle lock")
+            .report
+            .clone()
+    }
 }
 
 impl<S: Substrate> Drop for Engine<S> {
     fn drop(&mut self) {
-        let subjects = {
+        let records: Vec<(String, String)> = {
             let mut state = self.ctx.state.lock().expect("poisoned engine state lock");
-            std::mem::take(&mut state.subjects)
+            state.subjects.drain(..).map(|r| (r.id, r.name)).collect()
         };
 
-        for (id, _) in subjects {
-            let subject = crate::substrate::Subject::new(id.clone());
-            if let Err(e) = self.ctx.substrate.teardown(subject) {
-                warn!("RAII teardown failed for subject {}: {}", id, e);
-            } else {
-                debug!("teardown complete for subject {}", id);
-            }
+        if records.is_empty() {
+            return;
         }
+
+        // Last-resort teardown (engine dropped without `shutdown`). We may be
+        // on a thread without a tokio runtime, so run the async teardown on a
+        // dedicated thread with its own current-thread runtime.
+        let substrate = std::sync::Arc::clone(&self.ctx.substrate);
+        let handle = std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    warn!("could not build teardown runtime: {}", e);
+                    return;
+                }
+            };
+            rt.block_on(async move {
+                for (id, name) in records {
+                    if let Err(e) = substrate.teardown(Subject::new(id.clone())).await {
+                        warn!("RAII teardown failed for subject {} ({}): {}", name, id, e);
+                    } else {
+                        debug!("teardown complete for subject {} ({})", name, id);
+                    }
+                }
+            });
+        });
+        let _ = handle.join();
     }
 }

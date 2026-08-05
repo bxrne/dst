@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AccumulationMode {
@@ -30,22 +30,28 @@ impl std::str::FromStr for AccumulationMode {
     }
 }
 
+/// One named experiment configuration, registered via `dstest.config()` and
+/// referenced by handle in `dstest.setup()` / `dstest.dst.step()`.
 #[derive(Clone, Debug)]
 pub struct Config {
     pub substrate: Option<String>,
     pub seed: Option<u64>,
-    pub fault_weights: HashMap<String, f32>,
+    /// Fault weights. BTreeMap so iteration order — and therefore the
+    /// weighted-selection order — is deterministic for a given seed.
+    pub fault_weights: BTreeMap<String, f32>,
     pub accumulation_mode: AccumulationMode,
     pub http_timeout_secs: u64,
     pub http_retries: u32,
     pub http_retry_delay_ms: u64,
     pub step_delay_ms: u64,
+    /// Total number of fault steps the fault tree will produce.
+    pub steps: usize,
     pub require_seed: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        let mut fault_weights = HashMap::new();
+        let mut fault_weights = BTreeMap::new();
         fault_weights.insert(String::from("pause"), 0.35);
         fault_weights.insert(String::from("kill"), 0.25);
         fault_weights.insert(String::from("deprive:disk"), 0.10);
@@ -62,18 +68,16 @@ impl Default for Config {
             http_retries: 30,
             http_retry_delay_ms: 500,
             step_delay_ms: 1000,
+            steps: 10,
             require_seed: true,
         }
     }
 }
 
 impl Config {
+    /// Validate invariants that normalization cannot fix. Call *before*
+    /// [`Config::normalize_weights`].
     pub fn validate(&self) -> Result<(), String> {
-        let total: f32 = self.fault_weights.values().sum();
-        if (total - 1.0).abs() > 0.01 {
-            return Err(format!("fault weights must sum to 1.0, got {}", total));
-        }
-
         for (name, weight) in &self.fault_weights {
             if *weight < 0.0 {
                 return Err(format!("weight for '{}' is negative: {}", name, weight));
@@ -127,6 +131,7 @@ mod tests {
         assert!(config.fault_weights.contains_key("pause"));
         assert!(config.fault_weights.contains_key("kill"));
         assert!(config.require_seed);
+        assert_eq!(config.steps, 10);
     }
 
     #[test]

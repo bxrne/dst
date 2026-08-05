@@ -2,7 +2,7 @@
 --- Oracle-driven chaos experiment: predicates + invariants during fault injection.
 --- Run: cat examples/oracle.lua | cargo run
 
-dstest.config({
+local docker_config = dstest.config({
     substrate = "docker",
     seed = 999,
     weights = {
@@ -13,12 +13,13 @@ dstest.config({
         ["deprive:cpu"] = 0.2,
     },
     accumulation = "single",
+    steps = 8,
     step_delay = 200,
     http_retries = 10,
     http_retry_delay = 200,
 })
 
-local s = dstest.setup({
+local s = dstest.setup(docker_config, {
     image = "kennethreitz/httpbin",
     ports = { 80 },
 })

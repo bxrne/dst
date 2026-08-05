@@ -3,72 +3,89 @@ use std::sync::Arc;
 use mlua::{Lua, Result, Table};
 
 use crate::engine::context::BindingContext;
+use crate::engine::state::SubjectRecord;
 use crate::substrate::Substrate;
+
+/// Map a config handle to a valid resource name fragment (Docker container
+/// names accept [a-zA-Z0-9_.-]; other substrates have similar rules).
+fn sanitize_name(handle: &str) -> String {
+    handle
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
 
 pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let state = Arc::clone(&ctx.state);
     let substrate = Arc::clone(&ctx.substrate);
-    let config = Arc::clone(&ctx.config);
 
-    let setup = lua.create_function(move |lua, args: mlua::MultiValue| {
-        let mut args_iter = args.into_iter();
-        let first = args_iter.next();
-        let second = args_iter.next();
+    let setup =
+        lua.create_async_function(move |_, (handle, config_tbl): (String, Table)| {
+            let state = Arc::clone(&state);
+            let substrate = Arc::clone(&substrate);
 
-        let (substrate_type, config_tbl): (Option<String>, Table) = match (first, second) {
-            (Some(mlua::Value::String(s)), Some(mlua::Value::Table(t))) => {
-                (Some(s.to_str()?.to_owned()), t)
+            async move {
+                let name = {
+                    let mut state = state.lock().expect("poisoned engine state lock");
+
+                    let cfg = state.configs.get(&handle).ok_or_else(|| {
+                        mlua::Error::RuntimeError(format!(
+                            "unknown config '{}' — pass the handle returned by dstest.config()",
+                            handle
+                        ))
+                    })?;
+
+                    if cfg.substrate.as_deref() != Some(S::NAME) {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "substrate mismatch: config '{}' wants \"{}\" but the engine was built for \"{}\"",
+                            handle,
+                            cfg.substrate.as_deref().unwrap_or("<none>"),
+                            S::NAME
+                        )));
+                    }
+
+                    state.name_counter += 1;
+                    format!(
+                        "dstest-{}-{}",
+                        sanitize_name(&handle),
+                        state.name_counter
+                    )
+                };
+
+                let data = substrate
+                    .parse_subject(&config_tbl)
+                    .map_err(mlua::Error::RuntimeError)?;
+
+                let hosted = substrate
+                    .host(&name, &data)
+                    .await
+                    .map_err(mlua::Error::RuntimeError)?;
+
+                let subject_id = format!("{}/{}", S::NAME, hosted.id);
+
+                let mut state = state.lock().expect("poisoned engine state lock");
+
+                if let Some(addr) = hosted.addr {
+                    state.subject_hosts.insert(subject_id.clone(), addr);
+                }
+
+                state.subjects.push(SubjectRecord {
+                    id: subject_id.clone(),
+                    name,
+                    config: handle,
+                    data,
+                    active_faults: Vec::new(),
+                });
+
+                Ok(subject_id)
             }
-            (Some(mlua::Value::Table(t)), None) => (None, t),
-            (Some(mlua::Value::String(s)), None) => {
-                let s = s.to_str()?.to_owned();
-                let t = lua.create_table()?;
-                (Some(s), t)
-            }
-            _ => {
-                return Err(mlua::Error::RuntimeError(
-                    "dstest.setup expects (table) or (string, table)".to_string(),
-                ));
-            }
-        };
-
-        let cfg = config.lock().expect("poisoned config lock");
-        let substrate_name = substrate_type
-            .or_else(|| cfg.substrate.clone())
-            .ok_or_else(|| {
-                mlua::Error::RuntimeError(
-                    "no substrate configured: call dstest.config({ substrate = \"docker\" }) first"
-                        .to_string(),
-                )
-            })?;
-        drop(cfg);
-
-        if substrate_name != S::NAME {
-            return Err(mlua::Error::RuntimeError(format!(
-                "substrate mismatch: config wants \"{}\" but engine was built for \"{}\"",
-                substrate_name,
-                S::NAME
-            )));
-        }
-
-        let data = substrate
-            .parse_subject(&config_tbl)
-            .map_err(mlua::Error::RuntimeError)?;
-
-        let hosted = substrate.host(&data).map_err(mlua::Error::RuntimeError)?;
-
-        let subject_id = format!("{}/{}", S::NAME, hosted.id);
-
-        let mut state = state.lock().expect("poisoned engine state lock");
-
-        if let Some(addr) = hosted.addr {
-            state.subject_hosts.insert(subject_id.clone(), addr);
-        }
-
-        state.subjects.push((subject_id.clone(), data));
-
-        Ok(subject_id)
-    })?;
+        })?;
 
     dstest.set("setup", setup)?;
     Ok(())

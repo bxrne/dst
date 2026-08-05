@@ -26,11 +26,20 @@ others are namespaced under sub-tables.
 | `dstest.config`, `dstest.setup` | experiment config, create subjects | [`src/bindings/core/README.md`](src/bindings/core/README.md) |
 | `dstest.dst.step`, `dstest.dst.run_steps`, `dstest.dst.clear` | fault injection | [`src/bindings/dst/README.md`](src/bindings/dst/README.md) |
 | `dstest.dst.oracle.*` | predicates, invariants, reports | [`src/bindings/dst/README.md`](src/bindings/dst/README.md) |
-| `dstest.net.http`, `dstest.net.tcp` | HTTP requests, raw TCP | [`src/bindings/net/README.md`](src/bindings/net/README.md) |
+| `dstest.net.http`, `dstest.net.tcp`, `dstest.net.link` | HTTP, TCP, subject links | [`src/bindings/net/README.md`](src/bindings/net/README.md) |
 | `dstest.inspect`, `dstest.logs`, `dstest.exec` | container introspection | [`src/bindings/subs/README.md`](src/bindings/subs/README.md) |
 | `dstest.pg.connect`, `dstest.pg.query`, `dstest.pg.close` | PostgreSQL | [`src/bindings/pg/README.md`](src/bindings/pg/README.md) |
-| `dstest.clock` | high-precision timestamps | [`src/bindings/clock.rs`](src/bindings/clock.rs) |
+| `dstest.clock`, `dstest.clock.now`, `dstest.clock.virtual` | timestamps, virtual clocks | [`src/bindings/clock.rs`](src/bindings/clock.rs) |
+| `dstest.storage.*` | virtual disk faults | [`src/bindings/storage.rs`](src/bindings/storage.rs) |
 | `dstest.debug`, `dstest.info`, `dstest.warn`, `dstest.error` | logging | [`src/bindings/log.rs`](src/bindings/log.rs) |
+
+## Configs and subjects
+
+`dstest.config({...})` registers a named configuration and returns a **handle**.
+`dstest.setup(handle, {...})` creates a subject linked to that config (and its
+substrate). Multiple configs can coexist; `dstest.dst.step()` /
+`dstest.dst.run_steps()` accept an optional config handle when more than one is
+registered.
 
 ## Default Weights
 
@@ -61,19 +70,36 @@ others are namespaced under sub-tables.
 
 ## Determinism
 
-Same seed produces identical fault sequences:
+Same seed produces identical fault schedules. The fault schedule is a pure
+function of the config's `seed`, `weights`, `steps`, and subject set:
 
 ```lua
-dstest.config({ substrate = "docker", seed = 42 })
-local s = dstest.setup({ image = "kennethreitz/httpbin", ports = { 80 } })
-local results1 = dstest.dst.run_steps(10)
-
-dstest.config({ substrate = "docker", seed = 42 })
-local s = dstest.setup({ image = "kennethreitz/httpbin", ports = { 80 } })
-local results2 = dstest.dst.run_steps(10)
-
--- results1 and results2 have identical fault sequences
+local cfg = dstest.config({ substrate = "docker", seed = 42, steps = 10 })
+local s = dstest.setup(cfg, { image = "kennethreitz/httpbin", ports = { 80 } })
+local results = dstest.dst.run_steps(10)
+-- re-running this script with seed 42 yields the identical fault sequence
 ```
+
+### Determinism contract
+
+Guaranteed reproducible for a given seed:
+
+- the fault schedule (types, targets, order) — weight iteration order is
+  sorted, so schedules do not depend on map ordering;
+- Lua's `math.random` (seeded from `seed` via `math.randomseed`).
+
+Not guaranteed on the Docker substrate (subjects are real processes): the
+subject's internal thread scheduling, wall-clock timing, and any
+container-image drift (pin images by digest to avoid it).
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | success |
+| `1` | script error |
+| `2` | oracle check failures |
+| `3` | infrastructure error (e.g. Docker daemon unreachable) |
 
 ## Examples
 

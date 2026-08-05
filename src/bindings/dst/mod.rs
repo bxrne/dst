@@ -5,6 +5,7 @@ use crate::engine::context::BindingContext;
 use crate::substrate::Substrate;
 
 mod clear;
+mod common;
 mod oracle;
 mod run_steps;
 mod step;

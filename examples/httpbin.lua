@@ -2,12 +2,12 @@
 --- HTTP analysis against httpbin: status assertions, body inspection, latency.
 --- Run: cat examples/httpbin.lua | cargo run
 
-dstest.config({
+local docker_config = dstest.config({
     substrate = "docker",
     seed = 42,
 })
 
-local s = dstest.setup({
+local s = dstest.setup(docker_config, {
     image = "kennethreitz/httpbin",
     ports = { 80 },
 })

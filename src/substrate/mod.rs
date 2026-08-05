@@ -1,3 +1,4 @@
+use crate::components::{ClockControl, NetworkControl, StorageControl};
 use crate::fault::Fault;
 use std::fmt::{self, Display};
 
@@ -64,6 +65,15 @@ pub trait ToLua {
     fn to_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value>;
 }
 
+/// A substrate hosts subjects and virtualises their environment.
+///
+/// Everything async here runs on the engine's single tokio runtime; the
+/// engine and bindings contain no substrate-specific code. Virtualised
+/// components (clock, network, storage) are exposed through the
+/// [`ClockControl`]/[`NetworkControl`]/[`StorageControl`] traits — never
+/// through substrate-specific types leaking into the engine — so new
+/// substrates plug in by implementing this trait plus whichever component
+/// traits they can support (`Nop*` for the rest).
 pub trait Substrate: Send + Sync + 'static {
     /// Human-readable substrate name (e.g. `"docker"`), matched against the
     /// `substrate` field of `dstest.config()`.
@@ -79,6 +89,13 @@ pub trait Substrate: Send + Sync + 'static {
     /// table passed to `dstest.logs`.
     type LogOpts: Default + Send + Sync + 'static;
 
+    /// Virtualised clock implementation (or `NopClock`).
+    type Clock: ClockControl;
+    /// Network link control implementation (or `NopNetwork`).
+    type Network: NetworkControl;
+    /// Virtual storage implementation (or `NopStorage`).
+    type Storage: StorageControl;
+
     /// Parse the Lua table from `dstest.setup()` into this substrate's
     /// `SubjectData`. Each substrate owns its own config schema — Docker
     /// reads `image`/`ports`/`volumes`/`env`/`cmd`, other substrates can
@@ -91,16 +108,22 @@ pub trait Substrate: Send + Sync + 'static {
     fn parse_log_opts(&self, table: Option<&mlua::Table>) -> Result<Self::LogOpts, String>;
 
     /// Pull/create/start a subject and return its instance id plus an
-    /// optional reachable address.
-    fn host(&self, data: &Self::SubjectData) -> Result<HostedSubject, String>;
+    /// optional reachable address. `name` is the engine-assigned subject
+    /// name (unique per experiment); substrates should use it to name
+    /// their resources so leaked resources are identifiable and cleanable.
+    async fn host(&self, name: &str, data: &Self::SubjectData) -> Result<HostedSubject, String>;
 
-    fn affect(&self, subject: &Subject, fault: &Fault) -> Result<(), String>;
-    fn clear_faults(&self, subject: &Subject) -> Result<(), String>;
-    fn teardown(&self, subject: Subject) -> Result<(), String>;
+    async fn affect(&self, subject: &Subject, fault: &Fault) -> Result<(), String>;
+    async fn clear_faults(&self, subject: &Subject) -> Result<(), String>;
+    async fn teardown(&self, subject: Subject) -> Result<(), String>;
 
-    fn logs(&self, subject: &Subject, opts: Self::LogOpts) -> Result<Vec<LogEntry>, String>;
-    fn inspect(&self, subject: &Subject) -> Result<Self::Inspect, String>;
-    fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String>;
+    async fn logs(&self, subject: &Subject, opts: Self::LogOpts) -> Result<Vec<LogEntry>, String>;
+    async fn inspect(&self, subject: &Subject) -> Result<Self::Inspect, String>;
+    async fn exec(&self, subject: &Subject, cmd: &[String]) -> Result<ExecResult, String>;
+
+    fn clock(&self) -> &Self::Clock;
+    fn network(&self) -> &Self::Network;
+    fn storage(&self) -> &Self::Storage;
 }
 
 #[cfg(test)]

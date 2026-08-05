@@ -62,3 +62,27 @@ Timeout is `http_timeout` seconds.
 | `conn:addr()` | Return the remote address string |
 | `conn:set_timeout(secs)` | Set read/write timeout in seconds |
 | `conn:set_nodelay(bool)` | Enable/disable TCP_NODELAY |
+
+## `dstest.net.link(a, b, port)`
+
+Establishes a controllable link between two subjects and returns a link handle
+for impairing it. This goes through the substrate's `NetworkControl`
+component — substrates without network virtualization (including the Docker
+substrate today) return a "not supported" error.
+
+```lua
+local link = dstest.net.link(subject_a, subject_b, 8080)
+link:latency(50, 10)                              -- 50ms delay + 10ms jitter
+link:loss(0.05)                                   -- 5% loss
+link:partition({ direction = "a->b", mode = "blackhole" })
+link:heal()
+```
+
+| Method | Description |
+|--------|-------------|
+| `link:latency(delay_ms, jitter_ms)` | Impose constant delay plus uniform jitter |
+| `link:loss(pct)` | Impose probabilistic loss (0.0–1.0) |
+| `link:partition({ direction, mode })` | Partition the link; `direction` is `"a->b"`, `"b->a"`, or `"both"` (default), `mode` is `"blackhole"` (default) or `"reset"` |
+| `link:heal()` | Remove all impairments |
+
+All impairment randomness derives from the experiment seed.

@@ -1,8 +1,7 @@
 use rand::Rng;
-use rand::RngCore;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -107,8 +106,8 @@ pub struct FaultTree {
 
 impl FaultTree {
     pub fn new(seed: u64, subjects: Vec<String>, config: &Config) -> Self {
-        let mut rng = StdRng::seed_from_u64(seed);
-        let total_steps = 1 + (rng.next_u32() % 10) as usize;
+        let rng = StdRng::seed_from_u64(seed);
+        let total_steps = config.steps;
         let weighted_faults = Self::build_weighted_faults(&config.fault_weights);
 
         Self {
@@ -140,7 +139,11 @@ impl FaultTree {
         })
     }
 
-    fn build_weighted_faults(weights: &HashMap<String, f32>) -> Vec<WeightedFault> {
+    /// Build the weighted fault table. The weights map is a BTreeMap, so
+    /// iteration order is sorted by fault name and therefore identical on
+    /// every run — a HashMap here would make weighted selection
+    /// nondeterministic even with a fixed seed.
+    fn build_weighted_faults(weights: &BTreeMap<String, f32>) -> Vec<WeightedFault> {
         let mut weighted_faults = Vec::new();
 
         for (name, weight) in weights {
@@ -185,6 +188,14 @@ impl FaultTree {
 mod tests {
     use super::*;
 
+    fn test_subjects() -> Vec<String> {
+        vec![
+            "docker/aaa".to_string(),
+            "docker/bbb".to_string(),
+            "docker/ccc".to_string(),
+        ]
+    }
+
     #[test]
     fn test_fault_display() {
         assert_eq!(Fault::Pause.to_string(), "pause");
@@ -207,5 +218,69 @@ mod tests {
         assert!(matches!(Tier::from_str("disk"), Ok(Tier::Disk)));
         assert!(matches!(Tier::from_str("network"), Ok(Tier::Network)));
         assert!(matches!(Tier::from_str("memory"), Ok(Tier::Memory)));
+    }
+
+    /// The core determinism guarantee: two fault trees built from the same
+    /// seed and the same config must produce identical fault schedules.
+    #[test]
+    fn test_same_seed_same_schedule() {
+        let config = Config::default();
+        let mut a = FaultTree::new(42, test_subjects(), &config);
+        let mut b = FaultTree::new(42, test_subjects(), &config);
+
+        for _ in 0..20 {
+            let sa = a.step();
+            let sb = b.step();
+            match (sa, sb) {
+                (None, None) => break,
+                (Some(x), Some(y)) => {
+                    assert_eq!(x.fault, y.fault);
+                    assert_eq!(x.subject_id, y.subject_id);
+                    assert_eq!(x.round, y.round);
+                }
+                _ => panic!("fault trees diverged"),
+            }
+        }
+    }
+
+    /// Different seeds should (overwhelmingly likely) produce different
+    /// schedules — guards against accidentally not seeding the RNG.
+    #[test]
+    fn test_different_seeds_differ() {
+        let config = Config::default();
+        let mut a = FaultTree::new(1, test_subjects(), &config);
+        let mut b = FaultTree::new(2, test_subjects(), &config);
+
+        let seq_a: Vec<_> = std::iter::from_fn(|| a.step())
+            .map(|s| (s.fault, s.subject_id))
+            .collect();
+        let seq_b: Vec<_> = std::iter::from_fn(|| b.step())
+            .map(|s| (s.fault, s.subject_id))
+            .collect();
+        assert_ne!(seq_a, seq_b);
+    }
+
+    /// The schedule length comes from config, not from the RNG.
+    #[test]
+    fn test_total_steps_from_config() {
+        let mut config = Config::default();
+        config.steps = 7;
+        let mut tree = FaultTree::new(42, test_subjects(), &config);
+        let count = std::iter::from_fn(|| tree.step()).count();
+        assert_eq!(count, 7);
+    }
+
+    /// Weighted-fault order must be sorted by fault name regardless of how
+    /// the weights map was populated, so selection order is stable.
+    #[test]
+    fn test_weighted_faults_sorted() {
+        let mut weights = BTreeMap::new();
+        weights.insert("pause".to_string(), 0.5);
+        weights.insert("kill".to_string(), 0.3);
+        weights.insert("deprive:cpu".to_string(), 0.2);
+
+        let weighted = FaultTree::build_weighted_faults(&weights);
+        let names: Vec<String> = weighted.iter().map(|wf| wf.fault.to_string()).collect();
+        assert_eq!(names, vec!["deprive:cpu", "kill", "pause"]);
     }
 }

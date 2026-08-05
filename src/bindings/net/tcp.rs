@@ -138,25 +138,29 @@ impl UserData for TcpConnection {
 
 pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let state = Arc::clone(&ctx.state);
-    let config = Arc::clone(&ctx.config);
 
     let tcp_fn = lua.create_function(move |lua, (id, port): (String, u16)| {
-        let host = {
+        let (host, timeout_secs) = {
             let state = state.lock().expect("poisoned lock");
-            state
-                .subject_hosts
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown subject {}", id)))?
+            let rec = state
+                .subjects
+                .iter()
+                .find(|r| r.id == id)
+                .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown subject {}", id)))?;
+            let cfg = state.configs.get(&rec.config).ok_or_else(|| {
+                mlua::Error::RuntimeError(format!(
+                    "subject {} has unknown config '{}'",
+                    id, rec.config
+                ))
+            })?;
+            let host = state.subject_hosts.get(&id).cloned().ok_or_else(|| {
+                mlua::Error::RuntimeError(format!("subject {} has no address", id))
+            })?;
+            (host, cfg.http_timeout_secs)
         };
 
         let host_ip = host.split(':').next().unwrap_or(&host);
         let addr = format!("{}:{}", host_ip, port);
-
-        let timeout_secs = {
-            let cfg = config.lock().expect("poisoned lock");
-            cfg.http_timeout_secs
-        };
 
         let socket_addr = addr
             .to_socket_addrs()

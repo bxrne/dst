@@ -4,32 +4,50 @@ use std::time::Duration;
 use mlua::{Lua, Result, Table};
 
 use crate::engine::context::BindingContext;
+use crate::engine::state::EngineState;
 use crate::substrate::Substrate;
+
+/// Resolve a subject id to its reachable address plus the HTTP settings of
+/// the config it was created under.
+pub fn resolve_subject_http<S: Substrate>(
+    state: &EngineState<S>,
+    id: &str,
+) -> mlua::Result<(String, u64, u32, u64)> {
+    let rec = state
+        .subjects
+        .iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown subject {}", id)))?;
+    let cfg = state.configs.get(&rec.config).ok_or_else(|| {
+        mlua::Error::RuntimeError(format!(
+            "subject {} has unknown config '{}'",
+            id, rec.config
+        ))
+    })?;
+    let host = state
+        .subject_hosts
+        .get(id)
+        .cloned()
+        .ok_or_else(|| mlua::Error::RuntimeError(format!("subject {} has no address", id)))?;
+    Ok((
+        host,
+        cfg.http_timeout_secs,
+        cfg.http_retries,
+        cfg.http_retry_delay_ms,
+    ))
+}
 
 pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let state = Arc::clone(&ctx.state);
-    let config = Arc::clone(&ctx.config);
 
     let http_fn =
         lua.create_async_function(move |lua, (id, method, path): (String, String, String)| {
             let state = Arc::clone(&state);
-            let config = Arc::clone(&config);
 
             async move {
-                let (timeout, retries, delay) = {
-                    let cfg = config.lock().expect("poisoned config lock");
-                    (
-                        cfg.http_timeout_secs,
-                        cfg.http_retries,
-                        cfg.http_retry_delay_ms,
-                    )
-                };
-
-                let host = {
+                let (host, timeout, retries, delay) = {
                     let state = state.lock().expect("poisoned engine state lock");
-                    state.subject_hosts.get(&id).cloned().ok_or_else(|| {
-                        mlua::Error::RuntimeError(format!("unknown subject {}", id))
-                    })?
+                    resolve_subject_http(&state, &id)?
                 };
 
                 let url = format!("http://{host}{path}");

@@ -8,14 +8,19 @@ use crate::substrate::{Subject, Substrate, ToLua};
 pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let substrate = Arc::clone(&ctx.substrate);
 
-    let inspect_fn = lua.create_function(move |lua, id: String| {
-        let subject = Subject::new(id);
+    let inspect_fn = lua.create_async_function(move |lua, id: String| {
+        let substrate = Arc::clone(&substrate);
 
-        let info = substrate
-            .inspect(&subject)
-            .map_err(mlua::Error::RuntimeError)?;
+        async move {
+            let subject = Subject::new(id);
 
-        info.to_lua(lua)
+            let info = substrate
+                .inspect(&subject)
+                .await
+                .map_err(mlua::Error::RuntimeError)?;
+
+            info.to_lua(&lua)
+        }
     })?;
 
     dstest.set("inspect", inspect_fn)?;

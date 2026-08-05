@@ -4,6 +4,7 @@ mod dst;
 mod log;
 mod net;
 mod pg;
+mod storage;
 mod subs;
 
 use mlua::{Lua, Table};
@@ -27,6 +28,7 @@ pub fn register_all<S: Substrate>(
     clock::Clock::register(lua, dstest, ctx)?;
     core::Core::register(lua, dstest, ctx)?;
     pg::Pg::register(lua, dstest, ctx)?;
+    storage::Storage::register(lua, dstest, ctx)?;
 
     Ok(())
 }
