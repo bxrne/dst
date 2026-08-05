@@ -31,6 +31,7 @@ others are namespaced under sub-tables.
 | `dstest.pg.connect`, `dstest.pg.query`, `dstest.pg.close` | PostgreSQL | [`src/bindings/pg/README.md`](src/bindings/pg/README.md) |
 | `dstest.clock`, `dstest.clock.now`, `dstest.clock.virtual` | timestamps, virtual clocks | [`src/bindings/clock.rs`](src/bindings/clock.rs) |
 | `dstest.storage.*` | virtual disk faults | [`src/bindings/storage.rs`](src/bindings/storage.rs) |
+| `dstest.random.*` | seeded reproducible randomness | [`src/bindings/random.rs`](src/bindings/random.rs) |
 | `dstest.debug`, `dstest.info`, `dstest.warn`, `dstest.error` | logging | [`src/bindings/log.rs`](src/bindings/log.rs) |
 
 ## Configs and subjects

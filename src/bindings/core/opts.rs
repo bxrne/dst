@@ -10,10 +10,12 @@ use crate::substrate::Substrate;
 pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>) -> Result<()> {
     let state = Arc::clone(&ctx.state);
     let substrate = Arc::clone(&ctx.substrate);
+    let workload_rng = Arc::clone(&ctx.workload_rng);
 
     let config_fn = lua.create_function(move |lua, tbl: Table| {
         let state = Arc::clone(&state);
         let substrate = Arc::clone(&substrate);
+        let workload_rng = Arc::clone(&workload_rng);
         let mut cfg = Config::default();
 
         let name: Option<String> = tbl.get("name").ok();
@@ -31,6 +33,9 @@ pub fn register<S: Substrate>(lua: &Lua, dstest: &Table, ctx: &BindingContext<S>
             randomseed.call::<()>(seed)?;
             // Seed the network impairment RNG.
             substrate.network().set_seed(seed);
+            // Seed the workload RNG (separate stream from the fault tree).
+            *workload_rng.lock().expect("poisoned rng lock") =
+                Some(rand::SeedableRng::seed_from_u64(seed));
         }
 
         if let Ok(weights) = tbl.get::<Table>("weights") {

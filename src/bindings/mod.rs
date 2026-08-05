@@ -4,6 +4,7 @@ mod dst;
 mod log;
 mod net;
 mod pg;
+mod random;
 mod storage;
 mod subs;
 
@@ -29,6 +30,7 @@ pub fn register_all<S: Substrate>(
     core::Core::register(lua, dstest, ctx)?;
     pg::Pg::register(lua, dstest, ctx)?;
     storage::Storage::register(lua, dstest, ctx)?;
+    random::Random::register(lua, dstest, ctx)?;
 
     Ok(())
 }

@@ -11,10 +11,12 @@ use super::state::EngineState;
 
 pub struct BindingContext<S: Substrate> {
     pub state: Arc<Mutex<EngineState<S>>>,
-    /// One fault tree per config handle, created lazily at first step.
     pub fault_trees: Arc<Mutex<BTreeMap<String, FaultTree>>>,
     pub oracle: OracleRef,
     pub substrate: Arc<S>,
+    /// Seeded workload RNG for `dstest.random.*` (separate stream from the
+    /// fault tree's RNG, so workload draws don't affect the fault schedule).
+    pub workload_rng: Arc<Mutex<Option<rand::rngs::StdRng>>>,
     pub lua: Lua,
 }
 
@@ -26,6 +28,7 @@ impl<S: Substrate> BindingContext<S> {
             fault_trees: Arc::new(Mutex::new(BTreeMap::new())),
             oracle: Arc::new(Mutex::new(crate::oracle::Oracle::new())),
             substrate,
+            workload_rng: Arc::new(Mutex::new(None)),
             lua: Lua::new(),
         }
     }
