@@ -3,13 +3,13 @@
 --- verify the subject's own perception of time follows.
 --- Run: cat examples/clock.lua | cargo run
 
-local cfg = dstest.config({ substrate = "docker", seed = 1 })
+local cfg = dstest.config({ substrate = "docker", seed = 0xDEAD })
 
 local s = dstest.setup(cfg, {
-    image = "kennethreitz/httpbin",
-    ports = { 80 },
-    -- Opt into a virtual clock pinned to 2020-09-13T12:26:40Z.
-    clock = { virtual = true, start_epoch = 1600000000 },
+	image = "kennethreitz/httpbin",
+	ports = { 80 },
+	-- Opt into a virtual clock pinned to 2020-09-13T12:26:40Z.
+	clock = { virtual = true, start_epoch = 1600000000 },
 })
 
 -- The subject's own clock reports the pinned epoch (it doesn't advance on

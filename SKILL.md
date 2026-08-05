@@ -32,6 +32,23 @@ cargo install --path .
 | `cargo clippy -- -D warnings` | Lint gate (CI-enforced) |
 | `cargo doc --open` | Open API docs |
 
+## Extra Capabilities
+
+- **Virtual clocks** — pin a subject's `CLOCK_REALTIME` to an epoch and advance
+  it deterministically via `dstest.clock.virtual(s)` (see
+  [`src/bindings/clock/README.md`](src/bindings/clock/README.md)).
+- **Proxied network faults** — `dstest.net.link(a, b, port)` adds latency, loss,
+  and partitions between two subjects (see
+  [`src/bindings/net/README.md`](src/bindings/net/README.md)).
+- **Storage faults** — `dstest.storage.*` injects I/O errors, byte corruption,
+  and snapshot/restore on a `dm-flakey` virtual disk (requires root; see
+  [`src/bindings/storage/README.md`](src/bindings/storage/README.md)).
+- **Seeded workloads** — `dstest.random.*` (int, float, bool, choice, shuffle)
+  for reproducible non-fault randomness (see
+  [`src/bindings/random/README.md`](src/bindings/random/README.md)).
+- **Startup ordering** — `depends = { ... }` in `dstest.setup` waits for
+  upstream subjects' ports to accept TCP connections.
+
 ## Available Faults
 
 | Fault | Effect |
@@ -42,6 +59,52 @@ cargo install --path .
 | `deprive:network` | Disconnect from bridge network |
 | `deprive:memory` | Halve memory limit (min 64MB) |
 | `deprive:cpu` | Limit CPU to 20% quota |
+
+### Proxied Network Faults (`dstest.net.link`)
+
+Beyond container-level network disconnect, `dstest.net.link(a, b, port)`
+establishes a controllable link between two subjects for targeted impairments.
+All impairment randomness derives from the experiment seed.
+
+```lua
+local link = dstest.net.link(gateway, payment, 8083)
+link:latency(50, 20)      -- 50ms delay + 20ms jitter
+link:loss(0.05)           -- 5% packet loss
+link:partition({ direction = "a->b", mode = "blackhole" })
+link:heal()
+```
+
+| Method | Description |
+|--------|-------------|
+| `link:latency(delay_ms, jitter_ms)` | Constant delay plus uniform jitter |
+| `link:loss(pct)` | Probabilistic loss (0.0–1.0) |
+| `link:partition({ direction, mode })` | Partition; `direction` is `"a->b"`, `"b->a"`, or `"both"` (default), `mode` is `"blackhole"` (default) or `"reset"` |
+| `link:heal()` | Remove all impairments |
+
+### Storage Faults (`dstest.storage.*`)
+
+Inject disk-level faults onto a `dm-flakey` virtual disk. Opt in at subject
+creation (requires root on the host):
+
+```lua
+local s = dstest.setup(cfg, {
+    image = "alpine:3.20",
+    storage = { flaky = true, mount = "/data", size_mb = 64 },
+})
+
+dstest.storage.error(s, true)     -- EIO on all I/O
+dstest.storage.corrupt(s, 10)     -- flip 10 seeded bytes
+local snap = dstest.storage.snapshot(s)
+dstest.storage.restore(s, snap)   -- roll back
+```
+
+| Method | Description |
+|--------|-------------|
+| `dstest.storage.error(id, on)` | Toggle EIO on all I/O |
+| `dstest.storage.drop_writes(id, on)` | ACK writes but discard them |
+| `dstest.storage.corrupt(id, n)` | Flip `n` deterministic bytes |
+| `dstest.storage.snapshot(id)` | Snapshot and return an ID |
+| `dstest.storage.restore(id, snap)` | Restore a snapshot |
 
 ## Configuration
 
@@ -73,13 +136,15 @@ local docker_config = dstest.config({
 ## Core API
 
 ```lua
-local cfg = dstest.config({ substrate = "docker", seed = 42 })
 local s = dstest.setup(cfg, {
     image = "kennethreitz/httpbin",
     ports = { 80 },
     volumes = { "/absolute/host/path:/container:ro" },
     env = { DEBUG = "true" },
     cmd = { "python", "-m", "httpbin" },
+    depends = { other_subject },  -- Wait for another subject's port to accept TCP
+    clock = { virtual = true, start_epoch = 1600000000 },  -- opt into virtual clock
+    storage = { flaky = true, mount = "/data", size_mb = 64 },  -- virtual disk faults
 })
 
 -- Fault injection (namespaced under dstest.dst)
@@ -89,6 +154,13 @@ dstest.dst.clear(s)                        -- Clear active faults
 
 -- HTTP and TCP (namespaced under dstest.net)
 local resp = dstest.net.http(s, "GET", "/get")
+
+-- Virtual clock (per-subject, seeded)
+dstest.clock.virtual(s):advance(5000)     -- move subject clock +5s
+
+-- Seeded reproducible randomness for workloads
+local port = dstest.random.int(1024, 65536)
+dstest.random.shuffle(my_array)
 
 -- Container introspection (flat on dstest)
 local info = dstest.inspect(s)
@@ -139,9 +211,13 @@ end
 ### Multi-Service Testing
 ```lua
 local backend = dstest.setup(cfg, { image = "myapp/backend", ports = { 8080 } })
-local cache = dstest.setup(cfg, { image = "redis", ports = { 6379 } })
+local cache = dstest.setup(cfg, {
+    image = "redis",
+    ports = { 6379 },
+    depends = { backend },  -- wait for backend's port to accept TCP
+})
 
-dstest.dst.run_steps(10)
+dstest.dst.run_steps(cfg, 10)
 dstest.dst.clear(backend)
 dstest.dst.clear(cache)
 ```
@@ -177,7 +253,9 @@ dstest.error("failure occurred")
 | [`examples/httpbin.lua`](examples/httpbin.lua) | HTTP analysis: GET/POST, status/body assertions, latency |
 | [`examples/pg.lua`](examples/pg.lua) | PostgreSQL: connect, create table, insert, query, close |
 | [`examples/oracle.lua`](examples/oracle.lua) | Fault injection with oracle predicates and invariants |
-| [`examples/clock.lua`](examples/clock.lua) | Virtual clock injection: pin, advance, verify |
+| [`examples/clock.lua`](examples/clock.lua) | Virtual clock: pin, advance, verify subject time |
+| [`examples/storage.lua`](examples/storage.lua) | dm-flakey disk faults: errors, corruption, snapshot/restore |
+| [`examples/link.lua`](examples/link.lua) | Proxied network faults: latency, loss, partitions between subjects |
 
 ## Writing Scripts
 

@@ -3,17 +3,17 @@
 --- Run: cat examples/pg.lua | cargo run
 
 local docker_config = dstest.config({
-    substrate = "docker",
-    seed = 42,
+	substrate = "docker",
+	seed = 0xBEEF,
 })
 
 local s = dstest.setup(docker_config, {
-    image = "postgres:16-alpine",
-    ports = { 5432 },
-    env = {
-        POSTGRES_PASSWORD = "password",
-        POSTGRES_DB = "test_db",
-    },
+	image = "postgres:16-alpine",
+	ports = { 5432 },
+	env = {
+		POSTGRES_PASSWORD = "password",
+		POSTGRES_DB = "test_db",
+	},
 })
 
 -- Get the container's bridge IP for a direct connection
@@ -42,7 +42,7 @@ dstest.info("inserted 3 rows")
 local rows = dstest.pg.query(pool, "SELECT id, name FROM users ORDER BY id")
 dstest.info(string.format("query returned %d rows:", #rows))
 for _, row in ipairs(rows) do
-    dstest.info(string.format("  id=%d  name=%s", row.id, row.name))
+	dstest.info(string.format("  id=%d  name=%s", row.id, row.name))
 end
 
 -- Verify count

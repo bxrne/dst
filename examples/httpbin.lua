@@ -3,13 +3,13 @@
 --- Run: cat examples/httpbin.lua | cargo run
 
 local docker_config = dstest.config({
-    substrate = "docker",
-    seed = 42,
+	substrate = "docker",
+	seed = 0xBEEF,
 })
 
 local s = dstest.setup(docker_config, {
-    image = "kennethreitz/httpbin",
-    ports = { 80 },
+	image = "kennethreitz/httpbin",
+	ports = { 80 },
 })
 
 -- Baseline latency
@@ -22,9 +22,9 @@ dstest.info(string.format("baseline: %d bytes in %.2fms", #resp.body, elapsed_ms
 
 -- Status code endpoints
 for _, code in ipairs({ 200, 404, 500 }) do
-    local r = dstest.net.http(s, "GET", "/status/" .. code)
-    assert(r.status == code, string.format("/status/%d should return %d, got %d", code, code, r.status))
-    dstest.debug(string.format("  /status/%d -> %d", code, r.status))
+	local r = dstest.net.http(s, "GET", "/status/" .. code)
+	assert(r.status == code, string.format("/status/%d should return %d, got %d", code, code, r.status))
+	dstest.debug(string.format("  /status/%d -> %d", code, r.status))
 end
 
 -- POST with body
@@ -41,9 +41,9 @@ dstest.dst.clear(s)
 
 local ok, r = pcall(dstest.net.http, s, "GET", "/get")
 if ok and r.status == 200 then
-    dstest.info("recovered after fault clear")
+	dstest.info("recovered after fault clear")
 else
-    dstest.warn("not yet recovered")
+	dstest.warn("not yet recovered")
 end
 
 dstest.dst.clear(s)

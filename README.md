@@ -42,14 +42,16 @@ cargo run
 
 ## Overview
 
-dstest lets you write Lua scripts that define test subjects (Docker containers), inject faults (pause, kill, resource deprivation), and verify service resilience. All experiments are deterministic when seeded, making them reproducible across runs.
+dstest lets you write Lua scripts that define test subjects (Docker containers), inject faults (pause, kill, resource deprivation, proxied network impairments, virtual disk faults), and verify service resilience — including virtual clocks for time-dependent logic, seeded workload randomness, and `depends` for multi-service startup ordering. All experiments are deterministic when seeded, making them reproducible across runs.
 
 ## Examples
 
-- `httpbin.lua` - HTTP analysis: status/body assertions, latency timing, fault recovery
-- `pg.lua` - PostgreSQL lifecycle: connect, create table, insert, query, close
+- `httpbin.lua` - HTTP analysis: GET/POST, status/body assertions, latency, fault recovery
+- `pg.lua` - PostgreSQL: connect, create table, insert, query, close
 - `oracle.lua` - Fault injection with oracle predicates and invariants
-- `clock.lua` - Virtual clock injection: pin, advance, verify
+- `clock.lua` - Virtual clock: pin, advance, verify subject time
+- `storage.lua` - dm-flakey disk faults: errors, corruption, snapshot/restore
+- `link.lua` - Proxied network faults: latency, loss, partitions between subjects
 
 ## Documentation
 
